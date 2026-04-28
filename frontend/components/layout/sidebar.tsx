@@ -14,8 +14,8 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden lg:flex h-screen w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
-      <div className="flex h-16 items-center gap-2 px-5">
+    <aside className="sticky top-0 z-40 hidden h-screen w-60 shrink-0 flex-col self-start border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
+      <div className="flex h-16 shrink-0 items-center gap-2 px-5">
         <div className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 shadow-sm">
           <Package className="size-4 text-white" strokeWidth={2.5} />
         </div>
