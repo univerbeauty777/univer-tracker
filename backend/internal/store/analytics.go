@@ -14,14 +14,28 @@ type Analytics struct {
 
 // Overview is the headline KPI block shown at the top of the dashboard.
 type Overview struct {
-	Total30d         int     `json:"total_30d"`
-	Delivered30d     int     `json:"delivered_30d"`
-	OnTime30d        int     `json:"on_time_30d"`
-	OnTimeRate       float64 `json:"on_time_rate"`
-	AtRisk           int     `json:"at_risk"`
-	Breached         int     `json:"breached"`
-	AvgDeliveryDays  float64 `json:"avg_delivery_days"`
-	IdleAlarms       int     `json:"idle_alarms"`
+	Total30d        int     `json:"total_30d"`
+	Delivered30d    int     `json:"delivered_30d"`
+	OnTime30d       int     `json:"on_time_30d"`
+	OnTimeRate      float64 `json:"on_time_rate"`
+	AtRisk          int     `json:"at_risk"`
+	Breached        int     `json:"breached"`
+	AvgDeliveryDays float64 `json:"avg_delivery_days"`
+	IdleAlarms      int     `json:"idle_alarms"`
+
+	// PreviousPeriod is the same KPI block for the prior 30-day window
+	// so the dashboard can render up/down deltas.
+	PreviousPeriod *PreviousPeriod `json:"previous_period,omitempty"`
+}
+
+// PreviousPeriod holds the KPI snapshot for the 30-day window ending
+// 30 days ago — comparable to Overview for delta computation.
+type PreviousPeriod struct {
+	Total30d        int     `json:"total_30d"`
+	Delivered30d    int     `json:"delivered_30d"`
+	OnTime30d       int     `json:"on_time_30d"`
+	OnTimeRate      float64 `json:"on_time_rate"`
+	AvgDeliveryDays float64 `json:"avg_delivery_days"`
 }
 
 // CarrierStats summarises performance per carrier in the last 30 days.
@@ -76,7 +90,54 @@ WHERE tracking_code <> ''`
 	if o.Delivered30d > 0 {
 		o.OnTimeRate = float64(o.OnTime30d) / float64(o.Delivered30d)
 	}
+
+	prev, err := a.fetchPrevious(ctx)
+	if err == nil {
+		o.PreviousPeriod = prev
+	}
 	return &o, nil
+}
+
+func (a *Analytics) fetchPrevious(ctx context.Context) (*PreviousPeriod, error) {
+	const q = `
+SELECT
+    COUNT(*) FILTER (
+        WHERE created_at >= NOW() - INTERVAL '60 days'
+          AND created_at < NOW() - INTERVAL '30 days'
+    ) AS total,
+    COUNT(*) FILTER (
+        WHERE delivered_at IS NOT NULL
+          AND delivered_at >= NOW() - INTERVAL '60 days'
+          AND delivered_at < NOW() - INTERVAL '30 days'
+    ) AS delivered,
+    COUNT(*) FILTER (
+        WHERE delivered_at IS NOT NULL
+          AND delivered_at >= NOW() - INTERVAL '60 days'
+          AND delivered_at < NOW() - INTERVAL '30 days'
+          AND estimated_delivery IS NOT NULL
+          AND delivered_at::date <= estimated_delivery
+    ) AS on_time,
+    COALESCE(
+        AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400.0)
+        FILTER (
+            WHERE delivered_at IS NOT NULL
+              AND delivered_at >= NOW() - INTERVAL '60 days'
+              AND delivered_at < NOW() - INTERVAL '30 days'
+        ),
+        0
+    ) AS avg_days
+FROM shipments
+WHERE tracking_code <> ''`
+
+	var p PreviousPeriod
+	err := a.Pool.QueryRow(ctx, q).Scan(&p.Total30d, &p.Delivered30d, &p.OnTime30d, &p.AvgDeliveryDays)
+	if err != nil {
+		return nil, err
+	}
+	if p.Delivered30d > 0 {
+		p.OnTimeRate = float64(p.OnTime30d) / float64(p.Delivered30d)
+	}
+	return &p, nil
 }
 
 // FetchCarriers returns the top carriers by volume over the last 30 days.

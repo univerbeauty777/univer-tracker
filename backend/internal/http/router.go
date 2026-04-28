@@ -12,8 +12,10 @@ import (
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/http/handler"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/notifier"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
+	syncpkg "github.com/univerbeauty777/univer-tracker/backend/internal/sync"
 )
 
 const defaultStoreID = int64(1)
@@ -29,25 +31,53 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	settingsStore := settings.New(pool)
 	resolver := integrations.New(settingsStore, cfg)
 
+	auditRepo := &store.Audit{Pool: pool}
+	wahaNotifier := notifier.New(resolver, "")
+
 	orders := &handler.Orders{
 		StoreID:      defaultStoreID,
 		Orders:       &store.Orders{Pool: pool},
 		Shipments:    &store.Shipments{Pool: pool},
 		Events:       &store.Events{Pool: pool},
 		Facets:       &store.Facets{Pool: pool},
+		Audit:        auditRepo,
+		Notifier:     wahaNotifier,
 		Integrations: resolver,
 		Log:          log,
 	}
 	mux.HandleFunc("GET /api/v1/orders", orders.List)
 	mux.HandleFunc("GET /api/v1/orders/facets", orders.FacetsList)
+	mux.HandleFunc("GET /api/v1/orders/export.csv", orders.ExportCSV)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orders.Get)
+	mux.HandleFunc("GET /api/v1/orders/{id}/history", orders.History)
 	mux.HandleFunc("PATCH /api/v1/orders/{id}/status", orders.UpdateStatus)
+	mux.HandleFunc("POST /api/v1/orders/{id}/notify", orders.Notify)
 
 	analytics := &handler.Analytics{
 		Repo: &store.Analytics{Pool: pool},
 		Log:  log,
 	}
 	mux.HandleFunc("GET /api/v1/analytics/overview", analytics.Overview)
+
+	stateRepo := &store.SyncStates{Pool: pool}
+	wcSync := &syncpkg.WooCommerce{
+		Store:        &store.Orders{Pool: pool},
+		Shipments:    &store.Shipments{Pool: pool},
+		State:        stateRepo,
+		Integrations: resolver,
+		StoreID:      defaultStoreID,
+		Log:          log,
+	}
+	frenetSync := &syncpkg.Frenet{
+		Shipments:    &store.Shipments{Pool: pool},
+		Events:       &store.Events{Pool: pool},
+		Integrations: resolver,
+		BatchSize:    50,
+		Log:          log,
+	}
+	syncH := &handler.SyncH{State: stateRepo, WC: wcSync, Frenet: frenetSync, Log: log}
+	mux.HandleFunc("GET /api/v1/sync/status", syncH.Status)
+	mux.HandleFunc("POST /api/v1/sync/run", syncH.Trigger)
 
 	settingsH := &handler.Settings{
 		Store:    settingsStore,

@@ -3,6 +3,7 @@ package handler
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -25,8 +26,15 @@ type Orders struct {
 	Shipments    *store.Shipments
 	Events       *store.Events
 	Facets       *store.Facets
+	Audit        *store.Audit
+	Notifier     OrderNotifier
 	Integrations *integrations.Resolver
 	Log          *slog.Logger
+}
+
+// OrderNotifier is what we need from a notification channel.
+type OrderNotifier interface {
+	SendText(ctx context.Context, phone, message string) error
 }
 
 // Facets handles GET /api/v1/orders/facets.
@@ -253,6 +261,13 @@ func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture previous status before mutating.
+	var prev string
+	dbBefore, _ := h.Orders.GetByWCID(ctx, h.StoreID, wcID)
+	if dbBefore != nil {
+		prev = dbBefore.Status
+	}
+
 	if err := wc.UpdateOrderStatus(ctx, wcID, body.Status); err != nil {
 		h.Log.Error("wc update status failed", "wc_order_id", wcID, "err", err)
 		writeError(w, http.StatusBadGateway, "could not update woocommerce")
@@ -264,11 +279,200 @@ func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID); err == nil {
-		_ = h.Orders.UpdateStatus(ctx, dbOrder.ID, body.Status)
+	if dbBefore != nil {
+		_ = h.Orders.UpdateStatus(ctx, dbBefore.ID, body.Status)
+		if h.Audit != nil && prev != body.Status {
+			_ = h.Audit.RecordStatusChange(ctx, store.StatusChange{
+				OrderID:    dbBefore.ID,
+				FromStatus: prev,
+				ToStatus:   body.Status,
+				Source:     "manual",
+				Note:       body.Note,
+				Actor:      "dashboard",
+			})
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"id": wcID, "status": body.Status})
+}
+
+// History handles GET /api/v1/orders/{id}/history (status audit log).
+func (h *Orders) History(w http.ResponseWriter, r *http.Request) {
+	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{"changes": []any{}, "notifications": []any{}})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load order")
+		return
+	}
+
+	changes, _ := h.Audit.ListStatusChanges(ctx, dbOrder.ID)
+	notes, _ := h.Audit.ListNotifications(ctx, dbOrder.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"changes":       changes,
+		"notifications": notes,
+	})
+}
+
+// Notify handles POST /api/v1/orders/{id}/notify — sends a WhatsApp text
+// to the customer's phone via the configured WAHA gateway and records it.
+func (h *Orders) Notify(w http.ResponseWriter, r *http.Request) {
+	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+
+	var body struct {
+		Message  string `json:"message"`
+		Template string `json:"template,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	body.Message = strings.TrimSpace(body.Message)
+	if body.Message == "" {
+		writeError(w, http.StatusUnprocessableEntity, "message is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+	if strings.TrimSpace(dbOrder.CustomerPhone) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "this order has no phone number")
+		return
+	}
+	if h.Notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "notifier not configured")
+		return
+	}
+
+	sendErr := h.Notifier.SendText(ctx, dbOrder.CustomerPhone, body.Message)
+	rec := store.Notification{
+		OrderID:  dbOrder.ID,
+		Channel:  "waha",
+		Template: body.Template,
+		Status:   "sent",
+	}
+	if sendErr != nil {
+		rec.Status = "failed"
+		rec.Error = sendErr.Error()
+	}
+	rec.Payload, _ = json.Marshal(map[string]any{"message": body.Message, "phone": dbOrder.CustomerPhone})
+	_ = h.Audit.RecordNotification(ctx, rec)
+
+	if sendErr != nil {
+		h.Log.Warn("waha send failed", "wc_order_id", wcID, "err", sendErr)
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": sendErr.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Mensagem enviada via WhatsApp."})
+}
+
+// ExportCSV handles GET /api/v1/orders/export.csv with the same filters as
+// List, streaming a UTF-8 CSV the dashboard can let ops download.
+func (h *Orders) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	q := r.URL.Query()
+	filters := store.ListFilters{
+		StoreID: h.StoreID,
+		Limit:   1000,
+		Offset:  0,
+		Search:  strings.TrimSpace(q.Get("q")),
+	}
+	if s := q.Get("status"); s != "" {
+		filters.Statuses = strings.Split(s, ",")
+	}
+	if hf := q.Get("health"); hf != "" {
+		filters.Health = strings.Split(hf, ",")
+	}
+	if c := q.Get("carrier"); c != "" {
+		filters.Carriers = strings.Split(c, ",")
+	}
+	if u := q.Get("uf"); u != "" {
+		filters.UFs = strings.Split(strings.ToUpper(u), ",")
+	}
+	if since := q.Get("since"); since != "" {
+		if t, err := time.Parse("2006-01-02", since); err == nil {
+			filters.Since = &t
+		}
+	}
+	if until := q.Get("until"); until != "" {
+		if t, err := time.Parse("2006-01-02", until); err == nil {
+			next := t.AddDate(0, 0, 1)
+			filters.Until = &next
+		}
+	}
+
+	res, err := h.Orders.List(ctx, filters)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load orders")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="pedidos.csv"`)
+	w.Write([]byte("\xEF\xBB\xBF")) // UTF-8 BOM for Excel compatibility
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+
+	_ = cw.Write([]string{
+		"pedido_wc", "criado_em", "pago_em", "status_wc", "cliente",
+		"cidade", "uf", "metodo_envio", "total_brl",
+		"rastreio", "transportadora", "servico",
+		"saude", "ultimo_evento", "ultimo_evento_em", "eta",
+	})
+	for _, row := range res.Rows {
+		o := row.Order
+		var s store.Shipment
+		if row.Shipment != nil {
+			s = *row.Shipment
+		}
+		_ = cw.Write([]string{
+			strconv.FormatInt(o.WCOrderID, 10),
+			o.CreatedAt.Format(time.RFC3339),
+			optionalTime(o.PaidAt),
+			o.Status,
+			o.CustomerName,
+			o.CustomerCity,
+			o.CustomerUF,
+			o.ShippingMethod,
+			strconv.FormatFloat(o.TotalBRL, 'f', 2, 64),
+			s.TrackingCode,
+			s.Carrier,
+			s.Service,
+			s.Health,
+			s.LastEvent,
+			optionalTime(s.LastEventAt),
+			optionalTime(s.EstimatedDelivery),
+		})
+	}
+}
+
+func optionalTime(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 func projectListItem(row *store.OrderRow) orderListItem {

@@ -1,0 +1,4 @@
+BEGIN;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS status_changes;
+COMMIT;

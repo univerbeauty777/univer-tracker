@@ -15,6 +15,10 @@ type SyncStates struct {
 	Pool *pgxpool.Pool
 }
 
+// PoolHandle exposes the underlying pool when the handler needs to run a
+// custom query (e.g. derive the latest Frenet sync timestamp).
+func (r *SyncStates) PoolHandle() *pgxpool.Pool { return r.Pool }
+
 // Get returns the last sync state for an entity (or ErrNotFound).
 func (r *SyncStates) Get(ctx context.Context, entity string) (*SyncState, error) {
 	const q = `SELECT entity, last_synced_at, extra, updated_at FROM sync_state WHERE entity = $1`
