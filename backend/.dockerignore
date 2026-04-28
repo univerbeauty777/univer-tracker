@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+*.md
+bin/
+tmp/
+testdata/
+*.test
+*.out
