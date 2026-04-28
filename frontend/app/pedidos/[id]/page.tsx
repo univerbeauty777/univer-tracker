@@ -100,15 +100,15 @@ export default async function OrderDetailPage({
               {events.length > 0 ? (
                 <ol className="relative space-y-4 border-l border-border/60 pl-6">
                   {events.map((e, i) => (
-                    <li key={`${e.EventDateTime}-${i}`} className="relative">
+                    <li key={`${e.occurred_at}-${i}`} className="relative">
                       <span className="absolute -left-[27px] top-1 flex size-3 items-center justify-center rounded-full bg-info ring-4 ring-background" />
-                      <div className="text-sm font-medium">{e.EventDescription}</div>
+                      <div className="text-sm font-medium">{e.description}</div>
                       <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        <span>{formatDateTime(e.EventDateTime)}</span>
-                        {e.EventLocation ? (
+                        <span>{formatDateTime(e.occurred_at)}</span>
+                        {e.location ? (
                           <span className="inline-flex items-center gap-1">
                             <MapPin className="size-3" />
-                            {e.EventLocation}
+                            {e.location}
                           </span>
                         ) : null}
                       </div>

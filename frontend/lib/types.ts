@@ -19,21 +19,32 @@ export type ShipmentStatus =
   | "delivery-failed"
   | "returned";
 
-export interface TrackingEvent {
-  EventDateTime: string;
-  EventLocation: string;
-  EventDescription: string;
-  EventType: string;
+export type Health = "unknown" | "on_track" | "at_risk" | "breached";
+
+export interface TimelineEvent {
+  occurred_at: string;
+  description: string;
+  location?: string;
+  type?: string;
 }
 
-export interface TrackingInfo {
+export interface TrackingView {
   number: string;
   carrier: string;
+  service?: string;
   service_code?: string;
   url?: string;
   status: ShipmentStatus;
   status_label: string;
-  events?: TrackingEvent[];
+  health: Health;
+  health_label: string;
+  last_event?: string;
+  last_event_at?: string;
+  estimated_delivery?: string;
+  delivered_at?: string;
+  idle_since?: string;
+  risk_score: number;
+  events?: TimelineEvent[];
 }
 
 export interface Address {
@@ -55,28 +66,28 @@ export interface LineItem {
 
 export interface OrderListItem {
   id: number;
+  wc_order_id: number;
   status: string;
   status_label: string;
   customer_name: string;
   customer_city: string;
   customer_state: string;
-  total: string;
+  total: number;
   created_at: string;
   paid_at?: string;
-  tracking: TrackingInfo;
+  tracking: TrackingView;
 }
 
 export interface OrderDetail extends OrderListItem {
   email: string;
   phone: string;
+  shipping_method?: string;
   line_items: LineItem[];
   shipping: Address;
   billing: Address;
-  shipping_method?: string;
 }
 
 export interface OrdersResponse {
   orders: OrderListItem[];
-  page: number;
   count: number;
 }
