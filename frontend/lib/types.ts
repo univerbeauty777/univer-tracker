@@ -91,3 +91,26 @@ export interface OrdersResponse {
   orders: OrderListItem[];
   count: number;
 }
+
+export interface Overview {
+  total_30d: number;
+  delivered_30d: number;
+  on_time_30d: number;
+  on_time_rate: number;
+  at_risk: number;
+  breached: number;
+  avg_delivery_days: number;
+  idle_alarms: number;
+}
+
+export interface CarrierStats {
+  carrier: string;
+  total: number;
+  breached: number;
+  avg_delivery_days: number;
+}
+
+export interface OverviewResponse {
+  overview: Overview;
+  carriers: CarrierStats[];
+}

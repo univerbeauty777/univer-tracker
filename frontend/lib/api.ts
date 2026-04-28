@@ -1,4 +1,4 @@
-import type { OrderDetail, OrdersResponse } from "./types";
+import type { OrderDetail, OrdersResponse, OverviewResponse } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -12,11 +12,19 @@ function url(path: string, params?: Record<string, string | number | undefined>)
 
 export async function fetchOrders(params: {
   status?: string;
+  health?: string;
+  q?: string;
   page?: number;
   per_page?: number;
 } = {}): Promise<OrdersResponse> {
   const res = await fetch(url("/api/v1/orders", params), { cache: "no-store" });
   if (!res.ok) throw new Error(`orders fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOverview(): Promise<OverviewResponse> {
+  const res = await fetch(url("/api/v1/analytics/overview"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`overview fetch failed: ${res.status}`);
   return res.json();
 }
 

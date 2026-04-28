@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, MapPin, Package, ExternalLink } from "lucide-react";
+import { ArrowLeft, MapPin, Package, ExternalLink, Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge, ShipmentBadge } from "@/components/status-badge";
+import { HealthBadge } from "@/components/health-badge";
+import { SlaTracker } from "@/components/sla-tracker";
 import { ChangeStatusAction } from "@/components/change-status-action";
 import { fetchOrder } from "@/lib/api";
 import { formatBRL, formatDate, formatDateTime } from "@/lib/format";
+import type { Health } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +53,10 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={order.status} label={order.status_label} />
             <ShipmentBadge status={order.tracking.status} label={order.tracking.status_label} />
+            <HealthBadge
+              health={order.tracking.health as Health}
+              label={order.tracking.health_label}
+            />
             <ChangeStatusAction orderId={order.id} currentStatus={order.status} />
           </div>
         </div>
@@ -66,28 +73,65 @@ export default async function OrderDetailPage({
             </CardHeader>
             <CardContent className="space-y-4">
               {order.tracking.number ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 p-4">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                      Código
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Código
+                      </div>
+                      <div className="font-mono text-sm font-medium">{order.tracking.number}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {order.tracking.carrier || "transportadora desconhecida"}
+                        {order.tracking.service ? ` · ${order.tracking.service}` : ""}
+                      </div>
                     </div>
-                    <div className="font-mono text-sm font-medium">{order.tracking.number}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {order.tracking.carrier || "transportadora desconhecida"}
-                      {order.tracking.service_code ? ` · ${order.tracking.service_code}` : ""}
-                    </div>
+                    {order.tracking.url ? (
+                      <a
+                        href={order.tracking.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Rastrear no site
+                        <ExternalLink className="size-3" />
+                      </a>
+                    ) : null}
                   </div>
-                  {order.tracking.url ? (
-                    <a
-                      href={order.tracking.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      Rastrear no site
-                      <ExternalLink className="size-3" />
-                    </a>
-                  ) : null}
+
+                  <SlaTracker
+                    createdAt={order.created_at}
+                    estimatedDelivery={order.tracking.estimated_delivery}
+                    deliveredAt={order.tracking.delivered_at}
+                    health={order.tracking.health as Health}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <SlaStat label="Risco" value={`${order.tracking.risk_score}/100`} icon={Activity} />
+                    <SlaStat
+                      label="Sem evento há"
+                      value={
+                        order.tracking.idle_since
+                          ? `${idleDays(order.tracking.idle_since)} dias`
+                          : "—"
+                      }
+                    />
+                    <SlaStat
+                      label="ETA"
+                      value={
+                        order.tracking.estimated_delivery
+                          ? formatDate(order.tracking.estimated_delivery)
+                          : "—"
+                      }
+                    />
+                    <SlaStat
+                      label="Entregue em"
+                      value={
+                        order.tracking.delivered_at
+                          ? formatDate(order.tracking.delivered_at)
+                          : "—"
+                      }
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
@@ -126,7 +170,7 @@ export default async function OrderDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Itens do pedido</CardTitle>
+              <CardTitle>Itens</CardTitle>
             </CardHeader>
             <CardContent className="px-0">
               <div className="overflow-x-auto">
@@ -204,4 +248,29 @@ export default async function OrderDetailPage({
       </div>
     </div>
   );
+}
+
+function SlaStat({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon?: React.ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-card p-3">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        {Icon ? <Icon className="size-3" /> : null}
+        {label}
+      </div>
+      <div className="mt-1 font-display text-base font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function idleDays(idleSince: string): number {
+  const ms = Date.now() - new Date(idleSince).getTime();
+  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
 }
