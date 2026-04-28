@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,9 +60,22 @@ type ListFilters struct {
 	StoreID  int64
 	Statuses []string
 	Health   []string
+	Carriers []string
+	UFs      []string
 	Search   string // wc_order_id, tracking_code or customer_name LIKE
+	Since    *time.Time
+	Until    *time.Time
+	Sort     string // created_at | total | customer_name | last_event
+	SortDir  string // asc | desc
 	Limit    int
 	Offset   int
+}
+
+// ListResult is what List returns: orders + total matching the filter
+// (independent of limit/offset) so the dashboard can paginate.
+type ListResult struct {
+	Rows  []OrderRow
+	Total int
 }
 
 // OrderRow is what the list view returns: order + (optional) primary shipment.
@@ -70,8 +84,9 @@ type OrderRow struct {
 	Shipment *Shipment `json:"shipment,omitempty"`
 }
 
-// List returns orders with their primary shipment (most recently updated).
-func (r *Orders) List(ctx context.Context, f ListFilters) ([]OrderRow, error) {
+// List returns orders with their primary shipment (most recently updated)
+// plus the total count matching the filter (for pagination).
+func (r *Orders) List(ctx context.Context, f ListFilters) (ListResult, error) {
 	args := []any{}
 	where := []string{"1=1"}
 
@@ -87,20 +102,72 @@ func (r *Orders) List(ctx context.Context, f ListFilters) ([]OrderRow, error) {
 		args = append(args, f.Health)
 		where = append(where, fmt.Sprintf("s.health = ANY($%d)", len(args)))
 	}
+	if len(f.Carriers) > 0 {
+		args = append(args, f.Carriers)
+		where = append(where, fmt.Sprintf("s.carrier = ANY($%d)", len(args)))
+	}
+	if len(f.UFs) > 0 {
+		args = append(args, f.UFs)
+		where = append(where, fmt.Sprintf("o.customer_uf = ANY($%d)", len(args)))
+	}
+	if f.Since != nil {
+		args = append(args, *f.Since)
+		where = append(where, fmt.Sprintf("o.created_at >= $%d", len(args)))
+	}
+	if f.Until != nil {
+		args = append(args, *f.Until)
+		where = append(where, fmt.Sprintf("o.created_at < $%d", len(args)))
+	}
 	if f.Search != "" {
 		args = append(args, "%"+f.Search+"%")
 		idx := len(args)
 		where = append(where, fmt.Sprintf("(o.customer_name ILIKE $%[1]d OR s.tracking_code ILIKE $%[1]d OR CAST(o.wc_order_id AS TEXT) ILIKE $%[1]d)", idx))
 	}
 
+	orderBy := "o.created_at DESC"
+	dir := "DESC"
+	if strings.EqualFold(f.SortDir, "asc") {
+		dir = "ASC"
+	}
+	switch strings.ToLower(f.Sort) {
+	case "total":
+		orderBy = "o.total_brl " + dir
+	case "customer_name":
+		orderBy = "o.customer_name " + dir
+	case "last_event":
+		orderBy = "s.last_event_at " + dir + " NULLS LAST"
+	case "created_at", "":
+		orderBy = "o.created_at " + dir
+	}
+
+	whereClause := joinAnd(where)
+
 	limit := f.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	args = append(args, limit)
-	args = append(args, f.Offset)
 
-	q := fmt.Sprintf(`
+	// Total count first (without limit/offset).
+	countSQL := fmt.Sprintf(`
+SELECT COUNT(*)
+FROM orders o
+LEFT JOIN LATERAL (
+    SELECT * FROM shipments sh
+    WHERE sh.order_id = o.id
+    ORDER BY sh.updated_at DESC
+    LIMIT 1
+) s ON true
+WHERE %s`, whereClause)
+
+	var total int
+	if err := r.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return ListResult{}, fmt.Errorf("count orders: %w", err)
+	}
+
+	pagedArgs := append([]any{}, args...)
+	pagedArgs = append(pagedArgs, limit, f.Offset)
+
+	listSQL := fmt.Sprintf(`
 SELECT
     o.id, o.store_id, o.wc_order_id, o.status,
     o.customer_name, o.customer_email, o.customer_phone, o.customer_city, o.customer_uf,
@@ -117,13 +184,13 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) s ON true
 WHERE %s
-ORDER BY o.created_at DESC
+ORDER BY %s
 LIMIT $%d OFFSET $%d`,
-		joinAnd(where), len(args)-1, len(args))
+		whereClause, orderBy, len(pagedArgs)-1, len(pagedArgs))
 
-	rows, err := r.Pool.Query(ctx, q, args...)
+	rows, err := r.Pool.Query(ctx, listSQL, pagedArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("list orders: %w", err)
+		return ListResult{}, fmt.Errorf("list orders: %w", err)
 	}
 	defer rows.Close()
 
@@ -148,7 +215,7 @@ LIMIT $%d OFFSET $%d`,
 			&sLastSync, &sHealth, &sIdle, &sRisk,
 			&sCreated, &sUpdated,
 		); err != nil {
-			return nil, fmt.Errorf("scan order row: %w", err)
+			return ListResult{}, fmt.Errorf("scan order row: %w", err)
 		}
 
 		row := OrderRow{Order: o}
@@ -181,7 +248,7 @@ LIMIT $%d OFFSET $%d`,
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	return ListResult{Rows: out, Total: total}, rows.Err()
 }
 
 // GetByWCID fetches a single order by its WooCommerce id.

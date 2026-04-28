@@ -34,10 +34,12 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 		Orders:       &store.Orders{Pool: pool},
 		Shipments:    &store.Shipments{Pool: pool},
 		Events:       &store.Events{Pool: pool},
+		Facets:       &store.Facets{Pool: pool},
 		Integrations: resolver,
 		Log:          log,
 	}
 	mux.HandleFunc("GET /api/v1/orders", orders.List)
+	mux.HandleFunc("GET /api/v1/orders/facets", orders.FacetsList)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orders.Get)
 	mux.HandleFunc("PATCH /api/v1/orders/{id}/status", orders.UpdateStatus)
 

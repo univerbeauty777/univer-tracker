@@ -14,6 +14,7 @@ type Status string
 
 const (
 	StatusUnknown        Status = "unknown"
+	StatusLabelCreated   Status = "label-created"
 	StatusShipped        Status = "shipped"
 	StatusInTransit      Status = "in-transit"
 	StatusOutForDelivery Status = "out-for-delivery"
@@ -66,6 +67,7 @@ func MapEvent(description string) Status {
 	for _, p := range []string{
 		"em transito", "em transferencia", "encaminhado",
 		"em curso", "recebido na unidade", "saiu da unidade",
+		"correcao de rota",
 	} {
 		if strings.Contains(d, p) {
 			return StatusInTransit
@@ -79,6 +81,16 @@ func MapEvent(description string) Status {
 	} {
 		if strings.Contains(d, p) {
 			return StatusShipped
+		}
+	}
+
+	// 7. Label created (the carrier accepted but didn't pick up yet).
+	for _, p := range []string{
+		"etiqueta emitida", "aguardando postagem", "aguardando coleta",
+		"objeto aguardando",
+	} {
+		if strings.Contains(d, p) {
+			return StatusLabelCreated
 		}
 	}
 

@@ -1,4 +1,5 @@
 import type {
+  Facets,
   FrenetIntegration,
   IntegrationsResponse,
   OrderDetail,
@@ -8,6 +9,20 @@ import type {
   WAHAIntegration,
   WooCommerceIntegration,
 } from "./types";
+
+export interface OrdersQuery {
+  status?: string;
+  health?: string;
+  carrier?: string;
+  uf?: string;
+  q?: string;
+  since?: string;
+  until?: string;
+  sort?: "created_at" | "total" | "customer_name" | "last_event";
+  dir?: "asc" | "desc";
+  per_page?: number;
+  offset?: number;
+}
 
 // Browser fetch goes through the public API hostname (CORS + Traefik).
 // Server-side fetch (RSC, route handlers) prefers the Docker-internal
@@ -24,23 +39,24 @@ function baseURL(): string {
   return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 }
 
-function url(path: string, params?: Record<string, string | number | undefined>): string {
+function url(path: string, params?: Record<string, unknown>): string {
   const u = new URL(path, baseURL());
   for (const [k, v] of Object.entries(params ?? {})) {
-    if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
+    if (v === undefined || v === null || v === "") continue;
+    u.searchParams.set(k, String(v));
   }
   return u.toString();
 }
 
-export async function fetchOrders(params: {
-  status?: string;
-  health?: string;
-  q?: string;
-  page?: number;
-  per_page?: number;
-} = {}): Promise<OrdersResponse> {
-  const res = await fetch(url("/api/v1/orders", params), { cache: "no-store" });
+export async function fetchOrders(params: OrdersQuery = {}): Promise<OrdersResponse> {
+  const res = await fetch(url("/api/v1/orders", { ...params }), { cache: "no-store" });
   if (!res.ok) throw new Error(`orders fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchFacets(): Promise<Facets> {
+  const res = await fetch(url("/api/v1/orders/facets"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`facets fetch failed: ${res.status}`);
   return res.json();
 }
 

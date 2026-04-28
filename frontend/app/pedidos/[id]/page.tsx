@@ -2,13 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, MapPin, Package, ExternalLink, Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusBadge, ShipmentBadge } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { HealthBadge } from "@/components/health-badge";
 import { SlaTracker } from "@/components/sla-tracker";
+import { DeliveryProgress } from "@/components/delivery-progress";
 import { ChangeStatusAction } from "@/components/change-status-action";
 import { fetchOrder } from "@/lib/api";
-import { formatBRL, formatDate, formatDateTime } from "@/lib/format";
-import type { Health } from "@/lib/types";
+import { dedupeName, formatBRL, formatDate, formatDateTime, formatRelative } from "@/lib/format";
+import type { Health, ShipmentStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -47,12 +48,11 @@ export default async function OrderDetailPage({
               Pedido #{order.id}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {order.customer_name} · criado em {formatDate(order.created_at)}
+              {dedupeName(order.customer_name)} · criado em {formatDate(order.created_at)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={order.status} label={order.status_label} />
-            <ShipmentBadge status={order.tracking.status} label={order.tracking.status_label} />
             <HealthBadge
               health={order.tracking.health as Health}
               label={order.tracking.health_label}
@@ -73,7 +73,7 @@ export default async function OrderDetailPage({
             </CardHeader>
             <CardContent className="space-y-4">
               {order.tracking.number ? (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 p-4">
                     <div>
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -97,6 +97,8 @@ export default async function OrderDetailPage({
                       </a>
                     ) : null}
                   </div>
+
+                  <DeliveryProgress status={order.tracking.status as ShipmentStatus} />
 
                   <SlaTracker
                     createdAt={order.created_at}
@@ -215,7 +217,7 @@ export default async function OrderDetailPage({
               <CardTitle>Cliente</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 text-sm">
-              <div className="font-medium">{order.customer_name || "—"}</div>
+              <div className="font-medium">{dedupeName(order.customer_name) || "—"}</div>
               <div className="text-muted-foreground">{order.email || "—"}</div>
               <div className="text-muted-foreground">{order.phone || "—"}</div>
             </CardContent>
@@ -226,9 +228,7 @@ export default async function OrderDetailPage({
               <CardTitle>Entrega</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 text-sm">
-              <div>
-                {order.shipping.first_name} {order.shipping.last_name}
-              </div>
+              <div>{dedupeName(`${order.shipping.first_name} ${order.shipping.last_name}`)}</div>
               <div className="text-muted-foreground">
                 {order.shipping.city} · {order.shipping.state} · {order.shipping.postcode}
               </div>

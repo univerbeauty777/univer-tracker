@@ -20,12 +20,26 @@ import (
 
 // Orders serves the public Orders REST API.
 type Orders struct {
-	StoreID     int64
-	Orders      *store.Orders
-	Shipments   *store.Shipments
-	Events      *store.Events
+	StoreID      int64
+	Orders       *store.Orders
+	Shipments    *store.Shipments
+	Events       *store.Events
+	Facets       *store.Facets
 	Integrations *integrations.Resolver
-	Log         *slog.Logger
+	Log          *slog.Logger
+}
+
+// Facets handles GET /api/v1/orders/facets.
+func (h *Orders) FacetsList(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	out, err := h.Facets.All(ctx, h.StoreID)
+	if err != nil {
+		h.Log.Error("facets failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load facets")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // orderListItem is the slim shape used by the table view.
@@ -89,9 +103,11 @@ func (h *Orders) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filters := store.ListFilters{
 		StoreID: h.StoreID,
-		Limit:   parseInt(q.Get("per_page"), 100, 200),
+		Limit:   parseInt(q.Get("per_page"), 50, 200),
 		Offset:  parseInt(q.Get("offset"), 0, 0),
 		Search:  strings.TrimSpace(q.Get("q")),
+		Sort:    strings.TrimSpace(q.Get("sort")),
+		SortDir: strings.TrimSpace(q.Get("dir")),
 	}
 	if s := q.Get("status"); s != "" {
 		filters.Statuses = strings.Split(s, ",")
@@ -99,21 +115,41 @@ func (h *Orders) List(w http.ResponseWriter, r *http.Request) {
 	if hf := q.Get("health"); hf != "" {
 		filters.Health = strings.Split(hf, ",")
 	}
+	if c := q.Get("carrier"); c != "" {
+		filters.Carriers = strings.Split(c, ",")
+	}
+	if u := q.Get("uf"); u != "" {
+		filters.UFs = strings.Split(strings.ToUpper(u), ",")
+	}
+	if since := q.Get("since"); since != "" {
+		if t, err := time.Parse("2006-01-02", since); err == nil {
+			filters.Since = &t
+		}
+	}
+	if until := q.Get("until"); until != "" {
+		if t, err := time.Parse("2006-01-02", until); err == nil {
+			next := t.AddDate(0, 0, 1) // inclusive end-of-day
+			filters.Until = &next
+		}
+	}
 
-	rows, err := h.Orders.List(ctx, filters)
+	res, err := h.Orders.List(ctx, filters)
 	if err != nil {
 		h.Log.Error("list orders failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not load orders")
 		return
 	}
 
-	out := make([]orderListItem, 0, len(rows))
-	for i := range rows {
-		out = append(out, projectListItem(&rows[i]))
+	out := make([]orderListItem, 0, len(res.Rows))
+	for i := range res.Rows {
+		out = append(out, projectListItem(&res.Rows[i]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"orders": out,
+		"total":  res.Total,
 		"count":  len(out),
+		"limit":  filters.Limit,
+		"offset": filters.Offset,
 	})
 }
 
@@ -283,11 +319,53 @@ func projectEvents(evts []store.Event) []timelineEvent {
 		out = append(out, timelineEvent{
 			OccurredAt:  e.OccurredAt,
 			Description: e.Description,
-			Location:    e.Location,
+			Location:    prettifyLocation(e.Location),
 			Type:        e.Type,
 		})
 	}
 	return out
+}
+
+// prettifyLocation turns Frenet's "BELO HORIZONTE-MG" / "RECIFE-PE-BR" into
+// the title-cased "Belo Horizonte · MG" form the dashboard expects.
+func prettifyLocation(loc string) string {
+	loc = strings.TrimSpace(loc)
+	if loc == "" || loc == "-BR" || loc == "BR" {
+		return ""
+	}
+	loc = strings.TrimSuffix(loc, "-BR")
+	parts := strings.Split(loc, "-")
+	city := strings.TrimSpace(parts[0])
+	city = titleCasePT(city)
+	if len(parts) >= 2 {
+		uf := strings.ToUpper(strings.TrimSpace(parts[1]))
+		if city == "" {
+			return uf
+		}
+		return city + " · " + uf
+	}
+	return city
+}
+
+// titleCasePT lowercases acronyms-free input and uppercases each word's
+// first letter — Frenet sends "BELO HORIZONTE", we want "Belo Horizonte".
+// Conjunctions like "do/da/de" stay lowercase except at the start.
+func titleCasePT(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	parts := strings.Fields(s)
+	keepLower := map[string]bool{"de": true, "do": true, "da": true, "dos": true, "das": true, "e": true}
+	for i, p := range parts {
+		if i > 0 && keepLower[p] {
+			continue
+		}
+		runes := []rune(p)
+		runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+		parts[i] = string(runes)
+	}
+	return strings.Join(parts, " ")
 }
 
 // wcStatusLabel translates a WooCommerce status slug into a Portuguese label.

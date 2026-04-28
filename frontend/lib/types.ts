@@ -89,7 +89,22 @@ export interface OrderDetail extends OrderListItem {
 
 export interface OrdersResponse {
   orders: OrderListItem[];
+  total: number;
   count: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FacetValue {
+  value: string;
+  count: number;
+}
+
+export interface Facets {
+  carriers: FacetValue[];
+  ufs: FacetValue[];
+  statuses: FacetValue[];
+  health: FacetValue[];
 }
 
 export interface Overview {

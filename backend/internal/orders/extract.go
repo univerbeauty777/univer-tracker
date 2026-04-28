@@ -68,8 +68,10 @@ func (t TrackingInfo) HasTracking() bool {
 // StatusLabel translates a normalized status into a Portuguese display label.
 func StatusLabel(s frenet.Status) string {
 	switch s {
+	case frenet.StatusLabelCreated:
+		return "Etiqueta emitida"
 	case frenet.StatusShipped:
-		return "Enviado"
+		return "Postado"
 	case frenet.StatusInTransit:
 		return "Em trânsito"
 	case frenet.StatusOutForDelivery:
