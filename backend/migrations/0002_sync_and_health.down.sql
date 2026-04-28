@@ -1,8 +1,7 @@
 BEGIN;
 
 ALTER TABLE orders
-    DROP COLUMN IF EXISTS shipping_method,
-    DROP COLUMN IF EXISTS customer_phone;
+    DROP COLUMN IF EXISTS shipping_method;
 
 DROP INDEX IF EXISTS idx_shipments_idle_since;
 DROP INDEX IF EXISTS idx_shipments_health;

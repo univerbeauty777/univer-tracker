@@ -30,16 +30,16 @@ INSERT INTO orders (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, NOW()), NOW()
 )
 ON CONFLICT (store_id, wc_order_id) DO UPDATE SET
-    status         = EXCLUDED.status,
-    customer_name  = EXCLUDED.customer_name,
-    customer_email = EXCLUDED.customer_email,
-    customer_phone = EXCLUDED.customer_phone,
-    customer_city  = EXCLUDED.customer_city,
-    customer_uf    = EXCLUDED.customer_uf,
+    status          = EXCLUDED.status,
+    customer_name   = EXCLUDED.customer_name,
+    customer_email  = EXCLUDED.customer_email,
+    customer_phone  = EXCLUDED.customer_phone,
+    customer_city   = EXCLUDED.customer_city,
+    customer_uf     = EXCLUDED.customer_uf,
     shipping_method = EXCLUDED.shipping_method,
-    total_brl      = EXCLUDED.total_brl,
-    paid_at        = COALESCE(EXCLUDED.paid_at, orders.paid_at),
-    updated_at     = NOW()
+    total_brl       = EXCLUDED.total_brl,
+    paid_at         = COALESCE(EXCLUDED.paid_at, orders.paid_at),
+    updated_at      = NOW()
 RETURNING id;`
 	var id int64
 	err := r.Pool.QueryRow(ctx, q,
