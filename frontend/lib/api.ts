@@ -1,9 +1,22 @@
 import type { OrderDetail, OrdersResponse, OverviewResponse } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+// Browser fetch goes through the public API hostname (CORS + Traefik).
+// Server-side fetch (RSC, route handlers) prefers the Docker-internal
+// hostname when set — faster, no public DNS dependency, no TLS round
+// trip — and falls back to the public URL otherwise.
+function baseURL(): string {
+  if (typeof window === "undefined") {
+    return (
+      process.env.INTERNAL_API_URL ??
+      process.env.NEXT_PUBLIC_API_URL ??
+      "http://localhost:8080"
+    );
+  }
+  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+}
 
 function url(path: string, params?: Record<string, string | number | undefined>): string {
-  const u = new URL(path, API_URL);
+  const u = new URL(path, baseURL());
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
   }
