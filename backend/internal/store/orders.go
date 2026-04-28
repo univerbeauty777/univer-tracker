@@ -1,0 +1,236 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// ErrNotFound is returned when a record does not exist.
+var ErrNotFound = errors.New("not found")
+
+// Orders persists WooCommerce orders.
+type Orders struct {
+	Pool *pgxpool.Pool
+}
+
+// Upsert inserts or updates an Order keyed on (store_id, wc_order_id).
+// Returns the persisted row id.
+func (r *Orders) Upsert(ctx context.Context, o *Order) (int64, error) {
+	const q = `
+INSERT INTO orders (
+    store_id, wc_order_id, status,
+    customer_name, customer_email, customer_phone, customer_city, customer_uf,
+    shipping_method, total_brl, paid_at, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, NOW()), NOW()
+)
+ON CONFLICT (store_id, wc_order_id) DO UPDATE SET
+    status         = EXCLUDED.status,
+    customer_name  = EXCLUDED.customer_name,
+    customer_email = EXCLUDED.customer_email,
+    customer_phone = EXCLUDED.customer_phone,
+    customer_city  = EXCLUDED.customer_city,
+    customer_uf    = EXCLUDED.customer_uf,
+    shipping_method = EXCLUDED.shipping_method,
+    total_brl      = EXCLUDED.total_brl,
+    paid_at        = COALESCE(EXCLUDED.paid_at, orders.paid_at),
+    updated_at     = NOW()
+RETURNING id;`
+	var id int64
+	err := r.Pool.QueryRow(ctx, q,
+		o.StoreID, o.WCOrderID, o.Status,
+		o.CustomerName, o.CustomerEmail, o.CustomerPhone, o.CustomerCity, o.CustomerUF,
+		o.ShippingMethod, o.TotalBRL, o.PaidAt, o.CreatedAt,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("upsert order: %w", err)
+	}
+	o.ID = id
+	return id, nil
+}
+
+// ListFilters narrows the order list query.
+type ListFilters struct {
+	StoreID  int64
+	Statuses []string
+	Health   []string
+	Search   string // wc_order_id, tracking_code or customer_name LIKE
+	Limit    int
+	Offset   int
+}
+
+// OrderRow is what the list view returns: order + (optional) primary shipment.
+type OrderRow struct {
+	Order
+	Shipment *Shipment `json:"shipment,omitempty"`
+}
+
+// List returns orders with their primary shipment (most recently updated).
+func (r *Orders) List(ctx context.Context, f ListFilters) ([]OrderRow, error) {
+	args := []any{}
+	where := []string{"1=1"}
+
+	if f.StoreID > 0 {
+		args = append(args, f.StoreID)
+		where = append(where, fmt.Sprintf("o.store_id = $%d", len(args)))
+	}
+	if len(f.Statuses) > 0 {
+		args = append(args, f.Statuses)
+		where = append(where, fmt.Sprintf("o.status = ANY($%d)", len(args)))
+	}
+	if len(f.Health) > 0 {
+		args = append(args, f.Health)
+		where = append(where, fmt.Sprintf("s.health = ANY($%d)", len(args)))
+	}
+	if f.Search != "" {
+		args = append(args, "%"+f.Search+"%")
+		idx := len(args)
+		where = append(where, fmt.Sprintf("(o.customer_name ILIKE $%[1]d OR s.tracking_code ILIKE $%[1]d OR CAST(o.wc_order_id AS TEXT) ILIKE $%[1]d)", idx))
+	}
+
+	limit := f.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	args = append(args, limit)
+	args = append(args, f.Offset)
+
+	q := fmt.Sprintf(`
+SELECT
+    o.id, o.store_id, o.wc_order_id, o.status,
+    o.customer_name, o.customer_email, o.customer_phone, o.customer_city, o.customer_uf,
+    o.shipping_method, o.total_brl, o.paid_at, o.created_at, o.updated_at,
+    s.id, s.tracking_code, s.carrier, s.service, s.service_code, s.tracking_url,
+    s.status, s.last_event, s.last_event_at, s.estimated_delivery, s.delivered_at,
+    s.last_synced_at, s.health, s.idle_since, s.risk_score,
+    s.created_at, s.updated_at
+FROM orders o
+LEFT JOIN LATERAL (
+    SELECT * FROM shipments sh
+    WHERE sh.order_id = o.id
+    ORDER BY sh.updated_at DESC
+    LIMIT 1
+) s ON true
+WHERE %s
+ORDER BY o.created_at DESC
+LIMIT $%d OFFSET $%d`,
+		joinAnd(where), len(args)-1, len(args))
+
+	rows, err := r.Pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list orders: %w", err)
+	}
+	defer rows.Close()
+
+	var out []OrderRow
+	for rows.Next() {
+		var o Order
+		var s Shipment
+		var (
+			sID                                                               *int64
+			sTracking, sCarrier, sService, sServiceCode, sURL, sStatus, sLast *string
+			sLastAt, sETA, sDelivered, sLastSync, sIdle                       *time.Time
+			sHealth                                                           *string
+			sRisk                                                             *int16
+			sCreated, sUpdated                                                *time.Time
+		)
+		if err := rows.Scan(
+			&o.ID, &o.StoreID, &o.WCOrderID, &o.Status,
+			&o.CustomerName, &o.CustomerEmail, &o.CustomerPhone, &o.CustomerCity, &o.CustomerUF,
+			&o.ShippingMethod, &o.TotalBRL, &o.PaidAt, &o.CreatedAt, &o.UpdatedAt,
+			&sID, &sTracking, &sCarrier, &sService, &sServiceCode, &sURL,
+			&sStatus, &sLast, &sLastAt, &sETA, &sDelivered,
+			&sLastSync, &sHealth, &sIdle, &sRisk,
+			&sCreated, &sUpdated,
+		); err != nil {
+			return nil, fmt.Errorf("scan order row: %w", err)
+		}
+
+		row := OrderRow{Order: o}
+		if sID != nil {
+			s.ID = *sID
+			s.OrderID = o.ID
+			s.TrackingCode = derefStr(sTracking)
+			s.Carrier = derefStr(sCarrier)
+			s.Service = derefStr(sService)
+			s.ServiceCode = derefStr(sServiceCode)
+			s.TrackingURL = derefStr(sURL)
+			s.Status = derefStr(sStatus)
+			s.LastEvent = derefStr(sLast)
+			s.LastEventAt = sLastAt
+			s.EstimatedDelivery = sETA
+			s.DeliveredAt = sDelivered
+			s.LastSyncedAt = sLastSync
+			s.Health = derefStr(sHealth)
+			s.IdleSince = sIdle
+			if sRisk != nil {
+				s.RiskScore = *sRisk
+			}
+			if sCreated != nil {
+				s.CreatedAt = *sCreated
+			}
+			if sUpdated != nil {
+				s.UpdatedAt = *sUpdated
+			}
+			row.Shipment = &s
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// GetByWCID fetches a single order by its WooCommerce id.
+func (r *Orders) GetByWCID(ctx context.Context, storeID, wcOrderID int64) (*Order, error) {
+	const q = `
+SELECT id, store_id, wc_order_id, status,
+       customer_name, customer_email, customer_phone, customer_city, customer_uf,
+       shipping_method, total_brl, paid_at, created_at, updated_at
+FROM orders
+WHERE store_id = $1 AND wc_order_id = $2`
+
+	var o Order
+	err := r.Pool.QueryRow(ctx, q, storeID, wcOrderID).Scan(
+		&o.ID, &o.StoreID, &o.WCOrderID, &o.Status,
+		&o.CustomerName, &o.CustomerEmail, &o.CustomerPhone, &o.CustomerCity, &o.CustomerUF,
+		&o.ShippingMethod, &o.TotalBRL, &o.PaidAt, &o.CreatedAt, &o.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get order: %w", err)
+	}
+	return &o, nil
+}
+
+// UpdateStatus persists a new WC status (mirror of the source of truth).
+func (r *Orders) UpdateStatus(ctx context.Context, id int64, status string) error {
+	_, err := r.Pool.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, status, id)
+	if err != nil {
+		return fmt.Errorf("update status: %w", err)
+	}
+	return nil
+}
+
+func joinAnd(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += " AND "
+		}
+		out += p
+	}
+	return out
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

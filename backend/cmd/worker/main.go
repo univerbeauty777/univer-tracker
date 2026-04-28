@@ -1,5 +1,6 @@
-// Command worker runs background jobs for Univer Tracker
-// (Frenet polling, status sync, WhatsApp notifications via WAHA).
+// Command worker runs the periodic sync jobs that keep our local store in
+// step with WooCommerce and Frenet. It owns no HTTP surface; everything is
+// a ticker today and will graduate to a queue (Asynq) once we need fanout.
 package main
 
 import (
@@ -8,9 +9,20 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/sync"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 	"github.com/univerbeauty777/univer-tracker/backend/pkg/logger"
+)
+
+const (
+	wcInterval     = 5 * time.Minute
+	frenetInterval = 10 * time.Minute
+	defaultStoreID = int64(1) // single-store deploy for now
 )
 
 func main() {
@@ -32,16 +44,84 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// TODO: initialize job processor (Asynq), register handlers, start polling.
-	_ = ctx
+	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
+	pool, err := store.Open(dbCtx, cfg.Database.URL)
+	dbCancel()
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer pool.Close()
+
+	ordersRepo := &store.Orders{Pool: pool}
+	shipmentsRepo := &store.Shipments{Pool: pool}
+	eventsRepo := &store.Events{Pool: pool}
+	stateRepo := &store.SyncStates{Pool: pool}
+
+	wcClient := woocommerce.New(cfg.WooCommerce.URL, cfg.WooCommerce.ConsumerKey, cfg.WooCommerce.ConsumerSecret)
+	frenetClient := frenet.New(cfg.Frenet.APIToken)
+
+	wcSync := &sync.WooCommerce{
+		Store:     ordersRepo,
+		Shipments: shipmentsRepo,
+		State:     stateRepo,
+		WC:        wcClient,
+		StoreID:   defaultStoreID,
+		Log:       log,
+	}
+	frenetSync := &sync.Frenet{
+		Shipments: shipmentsRepo,
+		Events:    eventsRepo,
+		Client:    frenetClient,
+		BatchSize: 50,
+		Log:       log,
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	sig := <-stop
-	log.Info("shutting down worker", "signal", sig.String())
+	// Run an initial pass right away so the first deploy has data fast.
+	go runWC(ctx, log, wcSync)
+	go runFrenet(ctx, log, frenetSync)
 
-	cancel()
-	log.Info("worker stopped")
-	return nil
+	wcTicker := time.NewTicker(wcInterval)
+	defer wcTicker.Stop()
+	frenetTicker := time.NewTicker(frenetInterval)
+	defer frenetTicker.Stop()
+
+	for {
+		select {
+		case sig := <-stop:
+			log.Info("shutting down worker", "signal", sig.String())
+			cancel()
+			return nil
+		case <-wcTicker.C:
+			go runWC(ctx, log, wcSync)
+		case <-frenetTicker.C:
+			go runFrenet(ctx, log, frenetSync)
+		}
+	}
+}
+
+func runWC(ctx context.Context, log interface{ Info(msg string, args ...any); Error(msg string, args ...any) }, s *sync.WooCommerce) {
+	stats, err := s.Run(ctx)
+	if err != nil {
+		log.Error("wc sync failed", "err", err)
+		return
+	}
+	log.Info("wc sync done",
+		"synced", stats.Synced,
+		"errors", stats.Errors,
+		"duration_ms", stats.Finished.Sub(stats.Started).Milliseconds())
+}
+
+func runFrenet(ctx context.Context, log interface{ Info(msg string, args ...any); Error(msg string, args ...any) }, s *sync.Frenet) {
+	stats, err := s.Run(ctx)
+	if err != nil {
+		log.Error("frenet sync failed", "err", err)
+		return
+	}
+	log.Info("frenet sync done",
+		"synced", stats.Synced,
+		"errors", stats.Errors,
+		"duration_ms", stats.Finished.Sub(stats.Started).Milliseconds())
 }

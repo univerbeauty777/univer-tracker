@@ -9,138 +9,179 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/orders"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 )
 
-// Orders wires the WooCommerce and Frenet clients to HTTP routes.
+// Orders serves the public Orders REST API.
 type Orders struct {
-	WC     *woocommerce.Client
-	Frenet *frenet.Client
-	Log    *slog.Logger
+	StoreID   int64
+	Orders    *store.Orders
+	Shipments *store.Shipments
+	Events    *store.Events
+	WC        *woocommerce.Client
+	Frenet    *frenet.Client
+	Log       *slog.Logger
 }
 
-// orderListItem is a slim projection used by the table view.
+// orderListItem is the slim shape used by the table view.
 type orderListItem struct {
-	ID            int64               `json:"id"`
-	Status        string              `json:"status"`
-	StatusLabel   string              `json:"status_label"`
-	CustomerName  string              `json:"customer_name"`
-	CustomerCity  string              `json:"customer_city"`
-	CustomerState string              `json:"customer_state"`
-	Total         string              `json:"total"`
-	CreatedAt     time.Time           `json:"created_at"`
-	PaidAt        *time.Time          `json:"paid_at,omitempty"`
-	Tracking      orders.TrackingInfo `json:"tracking"`
+	ID            int64       `json:"id"`
+	WCOrderID     int64       `json:"wc_order_id"`
+	Status        string      `json:"status"`
+	StatusLabel   string      `json:"status_label"`
+	CustomerName  string      `json:"customer_name"`
+	CustomerCity  string      `json:"customer_city"`
+	CustomerState string      `json:"customer_state"`
+	Total         float64     `json:"total"`
+	CreatedAt    time.Time    `json:"created_at"`
+	PaidAt       *time.Time   `json:"paid_at,omitempty"`
+	Tracking     trackingView `json:"tracking"`
 }
 
-// orderDetail is the rich projection returned by GET /orders/:id — adds line items,
-// addresses and (when available) the live Frenet event timeline.
+type trackingView struct {
+	Number       string             `json:"number"`
+	Carrier      string             `json:"carrier"`
+	Service      string             `json:"service,omitempty"`
+	ServiceCode  string             `json:"service_code,omitempty"`
+	URL          string             `json:"url,omitempty"`
+	Status       frenet.Status      `json:"status"`
+	StatusLabel  string             `json:"status_label"`
+	Health       string             `json:"health"`
+	HealthLabel  string             `json:"health_label"`
+	LastEvent    string             `json:"last_event,omitempty"`
+	LastEventAt  *time.Time         `json:"last_event_at,omitempty"`
+	EstDelivery  *time.Time         `json:"estimated_delivery,omitempty"`
+	DeliveredAt  *time.Time         `json:"delivered_at,omitempty"`
+	IdleSince    *time.Time         `json:"idle_since,omitempty"`
+	RiskScore    int16              `json:"risk_score"`
+	Events       []timelineEvent    `json:"events,omitempty"`
+}
+
+type timelineEvent struct {
+	OccurredAt  time.Time `json:"occurred_at"`
+	Description string    `json:"description"`
+	Location    string    `json:"location,omitempty"`
+	Type        string    `json:"type,omitempty"`
+}
+
+// orderDetail extends the list item with the full WooCommerce projection
+// so the detail page can show line items and addresses without a 2nd hit.
 type orderDetail struct {
 	orderListItem
-	Email      string                  `json:"email"`
-	Phone      string                  `json:"phone"`
-	LineItems  []woocommerce.LineItem  `json:"line_items"`
-	Shipping   woocommerce.Address     `json:"shipping"`
-	Billing    woocommerce.Address     `json:"billing"`
-	ShippingMethod string              `json:"shipping_method,omitempty"`
+	Email          string                 `json:"email"`
+	Phone          string                 `json:"phone"`
+	ShippingMethod string                 `json:"shipping_method,omitempty"`
+	LineItems      []woocommerce.LineItem `json:"line_items"`
+	Shipping       woocommerce.Address    `json:"shipping"`
+	Billing        woocommerce.Address    `json:"billing"`
 }
 
-// List handles GET /api/v1/orders — proxies WooCommerce with optional status filter.
+// List handles GET /api/v1/orders.
 func (h *Orders) List(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
 	q := r.URL.Query()
-	params := woocommerce.ListOrdersParams{
-		PerPage: parseInt(q.Get("per_page"), 50, 200),
-		Page:    parseInt(q.Get("page"), 1, 0),
+	filters := store.ListFilters{
+		StoreID: h.StoreID,
+		Limit:   parseInt(q.Get("per_page"), 100, 200),
+		Offset:  parseInt(q.Get("offset"), 0, 0),
+		Search:  strings.TrimSpace(q.Get("q")),
 	}
 	if s := q.Get("status"); s != "" {
-		params.Status = strings.Split(s, ",")
+		filters.Statuses = strings.Split(s, ",")
 	}
-	if d := q.Get("after"); d != "" {
-		if t, err := time.Parse(time.RFC3339, d); err == nil {
-			params.After = t
-		}
+	if hf := q.Get("health"); hf != "" {
+		filters.Health = strings.Split(hf, ",")
 	}
 
-	wcOrders, err := h.WC.ListOrders(ctx, params)
+	rows, err := h.Orders.List(ctx, filters)
 	if err != nil {
 		h.Log.Error("list orders failed", "err", err)
-		writeError(w, http.StatusBadGateway, "could not reach woocommerce")
+		writeError(w, http.StatusInternalServerError, "could not load orders")
 		return
 	}
 
-	out := make([]orderListItem, 0, len(wcOrders))
-	for i := range wcOrders {
-		out = append(out, projectListItem(&wcOrders[i]))
+	out := make([]orderListItem, 0, len(rows))
+	for i := range rows {
+		out = append(out, projectListItem(&rows[i]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"orders": out,
-		"page":   params.Page,
 		"count":  len(out),
 	})
 }
 
-// Get handles GET /api/v1/orders/{id} — returns a single order enriched with
-// Frenet tracking events when a tracking number is known.
+// Get handles GET /api/v1/orders/{id} where id is the WooCommerce order id.
+// We reach back to WC for line items + addresses (which we don't store) and
+// load the persisted shipment + events from Postgres.
 func (h *Orders) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	wcOrder, err := h.WC.GetOrder(ctx, id)
+	dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
 	if err != nil {
-		h.Log.Error("get order failed", "err", err, "order_id", id)
-		writeError(w, http.StatusBadGateway, "could not reach woocommerce")
+		h.Log.Error("get order failed", "wc_order_id", wcID, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load order")
 		return
 	}
 
-	detail := projectDetail(wcOrder)
+	wcOrder, err := h.WC.GetOrder(ctx, wcID)
+	if err != nil {
+		h.Log.Warn("wc get order failed", "wc_order_id", wcID, "err", err)
+	}
 
-	// Enrich with live Frenet events in parallel — tracking is best-effort,
-	// don't fail the whole request if Frenet is down.
-	if detail.Tracking.HasTracking() && h.Frenet != nil {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			tctx, tcancel := context.WithTimeout(ctx, 10*time.Second)
-			defer tcancel()
-			info, err := h.Frenet.GetTrackingInfo(tctx, detail.Tracking.Number, detail.Tracking.ServiceCode)
-			if err != nil {
-				h.Log.Warn("frenet enrichment failed", "err", err, "order_id", id, "tracking", detail.Tracking.Number)
-				return
-			}
-			detail.Tracking.Events = info.TrackingEvents
-			if info.TrackingURL != "" {
-				detail.Tracking.URL = info.TrackingURL
-			}
-			if status := classify(info.TrackingEvents); status != frenet.StatusUnknown {
-				detail.Tracking.Status = status
-				detail.Tracking.StatusLabel = orders.StatusLabel(status)
-			}
-		}()
-		wg.Wait()
+	ships, err := h.Shipments.ListByOrder(ctx, dbOrder.ID)
+	if err != nil {
+		h.Log.Warn("list shipments failed", "order_id", dbOrder.ID, "err", err)
+	}
+	var primary *store.Shipment
+	if len(ships) > 0 {
+		primary = &ships[0]
+	}
+
+	row := &store.OrderRow{Order: *dbOrder, Shipment: primary}
+	detail := orderDetail{orderListItem: projectListItem(row)}
+
+	if primary != nil {
+		evts, err := h.Events.ListByShipment(ctx, primary.ID)
+		if err == nil {
+			detail.Tracking.Events = projectEvents(evts)
+		}
+	}
+
+	if wcOrder != nil {
+		detail.Email = wcOrder.Billing.Email
+		detail.Phone = wcOrder.Billing.Phone
+		detail.LineItems = wcOrder.LineItems
+		detail.Shipping = wcOrder.Shipping
+		detail.Billing = wcOrder.Billing
+		if len(wcOrder.ShippingLines) > 0 {
+			detail.ShippingMethod = wcOrder.ShippingLines[0].MethodTitle
+		}
 	}
 
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// UpdateStatus handles PATCH /api/v1/orders/{id}/status — pushes a new status
-// to WooCommerce and returns the refreshed order.
+// UpdateStatus handles PATCH /api/v1/orders/{id}/status.
 func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid order id")
 		return
@@ -155,85 +196,86 @@ func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Status = strings.TrimSpace(body.Status)
+	body.Status = strings.TrimPrefix(body.Status, "wc-")
 	if body.Status == "" {
 		writeError(w, http.StatusUnprocessableEntity, "status is required")
 		return
 	}
-	body.Status = strings.TrimPrefix(body.Status, "wc-")
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := h.WC.UpdateOrderStatus(ctx, id, body.Status); err != nil {
-		h.Log.Error("update status failed", "err", err, "order_id", id, "status", body.Status)
-		writeError(w, http.StatusBadGateway, "could not update woocommerce order")
+	if err := h.WC.UpdateOrderStatus(ctx, wcID, body.Status); err != nil {
+		h.Log.Error("wc update status failed", "wc_order_id", wcID, "err", err)
+		writeError(w, http.StatusBadGateway, "could not update woocommerce")
 		return
 	}
-
 	if body.Note != "" {
-		if err := h.WC.AddOrderNote(ctx, id, body.Note, false); err != nil {
-			h.Log.Warn("add note failed", "err", err, "order_id", id)
+		if err := h.WC.AddOrderNote(ctx, wcID, body.Note, false); err != nil {
+			h.Log.Warn("wc add note failed", "wc_order_id", wcID, "err", err)
 		}
 	}
 
-	wcOrder, err := h.WC.GetOrder(ctx, id)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": body.Status})
-		return
+	if dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID); err == nil {
+		_ = h.Orders.UpdateStatus(ctx, dbOrder.ID, body.Status)
 	}
-	writeJSON(w, http.StatusOK, projectDetail(wcOrder))
+
+	writeJSON(w, http.StatusOK, map[string]any{"id": wcID, "status": body.Status})
 }
 
-// classify takes the freshest event from Frenet and returns the normalized
-// status. We trust the most recent event in the list (Frenet returns DESC).
-func classify(events []frenet.TrackingEvent) frenet.Status {
-	for _, e := range events {
-		if s := frenet.MapEvent(e.EventDescription); s != frenet.StatusUnknown {
-			return s
-		}
-	}
-	return frenet.StatusUnknown
-}
-
-func projectListItem(o *woocommerce.Order) orderListItem {
+func projectListItem(row *store.OrderRow) orderListItem {
+	o := row.Order
 	li := orderListItem{
-		ID:            o.ID,
+		ID:            o.WCOrderID,
+		WCOrderID:     o.WCOrderID,
 		Status:        o.Status,
 		StatusLabel:   wcStatusLabel(o.Status),
-		CustomerName:  strings.TrimSpace(o.Shipping.FirstName + " " + o.Shipping.LastName),
-		CustomerCity:  o.Shipping.City,
-		CustomerState: o.Shipping.State,
-		Total:         o.Total,
-		CreatedAt:     o.DateCreatedGMT.Time,
-		Tracking:      orders.FromOrder(o),
+		CustomerName:  o.CustomerName,
+		CustomerCity:  o.CustomerCity,
+		CustomerState: o.CustomerUF,
+		Total:         o.TotalBRL,
+		CreatedAt:     o.CreatedAt,
+		PaidAt:        o.PaidAt,
+		Tracking: trackingView{
+			Status:      frenet.StatusUnknown,
+			StatusLabel: orders.StatusLabel(frenet.StatusUnknown),
+			Health:      "unknown",
+			HealthLabel: healthLabel("unknown"),
+		},
 	}
-	if li.CustomerName == "" {
-		li.CustomerName = strings.TrimSpace(o.Billing.FirstName + " " + o.Billing.LastName)
-	}
-	if li.CustomerCity == "" {
-		li.CustomerCity = o.Billing.City
-		li.CustomerState = o.Billing.State
-	}
-	if !o.DatePaidGMT.Time.IsZero() {
-		t := o.DatePaidGMT.Time
-		li.PaidAt = &t
+	if row.Shipment != nil {
+		s := row.Shipment
+		li.Tracking.Number = s.TrackingCode
+		li.Tracking.Carrier = s.Carrier
+		li.Tracking.Service = s.Service
+		li.Tracking.ServiceCode = s.ServiceCode
+		li.Tracking.URL = s.TrackingURL
+		st := frenet.Status(s.Status)
+		li.Tracking.Status = st
+		li.Tracking.StatusLabel = orders.StatusLabel(st)
+		li.Tracking.Health = s.Health
+		li.Tracking.HealthLabel = healthLabel(s.Health)
+		li.Tracking.LastEvent = s.LastEvent
+		li.Tracking.LastEventAt = s.LastEventAt
+		li.Tracking.EstDelivery = s.EstimatedDelivery
+		li.Tracking.DeliveredAt = s.DeliveredAt
+		li.Tracking.IdleSince = s.IdleSince
+		li.Tracking.RiskScore = s.RiskScore
 	}
 	return li
 }
 
-func projectDetail(o *woocommerce.Order) orderDetail {
-	d := orderDetail{
-		orderListItem: projectListItem(o),
-		Email:         o.Billing.Email,
-		Phone:         o.Billing.Phone,
-		LineItems:     o.LineItems,
-		Shipping:      o.Shipping,
-		Billing:       o.Billing,
+func projectEvents(evts []store.Event) []timelineEvent {
+	out := make([]timelineEvent, 0, len(evts))
+	for _, e := range evts {
+		out = append(out, timelineEvent{
+			OccurredAt:  e.OccurredAt,
+			Description: e.Description,
+			Location:    e.Location,
+			Type:        e.Type,
+		})
 	}
-	if len(o.ShippingLines) > 0 {
-		d.ShippingMethod = o.ShippingLines[0].MethodTitle
-	}
-	return d
+	return out
 }
 
 func wcStatusLabel(s string) string {
@@ -263,13 +305,29 @@ func wcStatusLabel(s string) string {
 	}
 }
 
+func healthLabel(h string) string {
+	switch h {
+	case "on_track":
+		return "No prazo"
+	case "at_risk":
+		return "Em risco"
+	case "breached":
+		return "SLA quebrado"
+	default:
+		return "Sem dados"
+	}
+}
+
 func parseInt(s string, def, max int) int {
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 {
+	if err != nil {
 		return def
 	}
 	if max > 0 && n > max {
 		return max
+	}
+	if n < 0 {
+		return def
 	}
 	return n
 }
@@ -283,6 +341,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
 }
-
-// ErrNotConfigured is returned when a required client (e.g. WC) is unset.
-var ErrNotConfigured = errors.New("client not configured")

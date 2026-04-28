@@ -13,6 +13,7 @@ import (
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
 	httpsrv "github.com/univerbeauty777/univer-tracker/backend/internal/http"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/pkg/logger"
 )
 
@@ -35,7 +36,16 @@ func run() error {
 		"port", cfg.App.Port,
 	)
 
-	router := httpsrv.NewRouter(cfg, log)
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	pool, err := store.Open(dbCtx, cfg.Database.URL)
+	dbCancel()
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer pool.Close()
+	log.Info("postgres pool ready")
+
+	router := httpsrv.NewRouter(cfg, log, pool)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.App.Port),
@@ -46,7 +56,6 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Start server.
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -54,7 +63,6 @@ func run() error {
 		}
 	}()
 
-	// Wait for shutdown signal or server error.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -65,10 +73,8 @@ func run() error {
 		log.Info("shutting down", "signal", sig.String())
 	}
 
-	// Graceful shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
