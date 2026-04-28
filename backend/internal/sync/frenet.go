@@ -107,7 +107,7 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 			ShipmentID:  ship.ID,
 			OccurredAt:  occ,
 			Description: e.EventDescription,
-			Location:    e.EventLocation,
+			Location:    cleanLocation(e.EventLocation),
 			Type:        strings.ToLower(strings.TrimSpace(e.EventType)),
 			Raw:         raw,
 		})
@@ -144,19 +144,37 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 	return nil
 }
 
-// parseFrenetTime accepts the two formats Frenet returns:
-//   - "2026-01-15 10:30:00"  (ISO-ish, UTC-naive)
-//   - "15/01/2026 10:30:00"  (BR locale)
+// cleanLocation strips the "-UF-BR" / "-BR" prefixes Frenet emits when
+// the city/state are unknown so the dashboard shows blank instead of
+// a misleading dash.
+func cleanLocation(s string) string {
+	t := strings.TrimSpace(s)
+	t = strings.TrimPrefix(t, "-")
+	t = strings.TrimSpace(t)
+	if t == "BR" {
+		return ""
+	}
+	return t
+}
+
+// parseFrenetTime accepts the formats Frenet actually returns in the
+// wild. The official docs only mention "dd/MM/yyyy HH:mm:ss" but the
+// production API also emits "dd/MM/yyyy HH:mm" (no seconds) for newly
+// created labels — every single event on a fresh shipment lands in
+// that shape, so missing it means the timeline is permanently empty.
 func parseFrenetTime(s string) time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}
 	}
 	for _, layout := range []string{
-		"2006-01-02 15:04:05",
 		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
 		"02/01/2006 15:04:05",
+		"02/01/2006 15:04",
+		"2006-01-02 15:04",
 		"02/01/2006",
+		"2006-01-02",
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC()
