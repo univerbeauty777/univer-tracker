@@ -7,13 +7,19 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /src
 
-# Cache dependencies layer.
+# Resolve modules first so dependency layers stay cached when only
+# application code changes.
 COPY go.mod go.sum* ./
-RUN go mod download || true
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-# Build binaries.
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
+
+# Compile both binaries with shared module + build caches so incremental
+# rebuilds (CI, Coolify) finish in seconds instead of minutes.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 # =============================================================================
@@ -21,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./c
 # =============================================================================
 FROM alpine:3.20 AS api
 
-RUN apk add --no-cache ca-certificates tzdata && \
+RUN apk add --no-cache ca-certificates curl tzdata && \
     addgroup -S app && adduser -S app -G app
 
 ENV TZ=America/Sao_Paulo
@@ -34,7 +40,7 @@ USER app
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost:8080/healthz || exit 1
+    CMD curl -fsS http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/app/api"]
 
