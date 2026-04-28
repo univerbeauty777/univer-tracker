@@ -5,14 +5,21 @@ type Variant = "default" | "secondary" | "destructive" | "success" | "warning" |
 const wcVariant: Record<string, Variant> = {
   pending: "warning",
   processing: "info",
+  separacao: "info",
+  aguardando: "warning",
   "on-hold": "warning",
+  enviado: "info",
+  shipped: "info",
+  "in-transit": "info",
+  "em-transito": "info",
+  "out-for-delivery": "info",
+  "em-rota": "info",
+  entregue: "success",
   completed: "success",
+  retornado: "destructive",
   cancelled: "destructive",
   refunded: "destructive",
   failed: "destructive",
-  shipped: "info",
-  "in-transit": "info",
-  "out-for-delivery": "info",
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

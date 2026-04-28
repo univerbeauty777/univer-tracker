@@ -1,4 +1,13 @@
-import type { OrderDetail, OrdersResponse, OverviewResponse } from "./types";
+import type {
+  FrenetIntegration,
+  IntegrationsResponse,
+  OrderDetail,
+  OrdersResponse,
+  OverviewResponse,
+  TestResult,
+  WAHAIntegration,
+  WooCommerceIntegration,
+} from "./types";
 
 // Browser fetch goes through the public API hostname (CORS + Traefik).
 // Server-side fetch (RSC, route handlers) prefers the Docker-internal
@@ -38,6 +47,58 @@ export async function fetchOrders(params: {
 export async function fetchOverview(): Promise<OverviewResponse> {
   const res = await fetch(url("/api/v1/analytics/overview"), { cache: "no-store" });
   if (!res.ok) throw new Error(`overview fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchIntegrations(): Promise<IntegrationsResponse> {
+  const res = await fetch(url("/api/v1/settings/integrations"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`integrations fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateWooCommerceIntegration(
+  body: Partial<WooCommerceIntegration>,
+): Promise<IntegrationsResponse> {
+  const res = await fetch(url("/api/v1/settings/integrations/woocommerce"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`save failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateFrenetIntegration(
+  body: Partial<FrenetIntegration>,
+): Promise<IntegrationsResponse> {
+  const res = await fetch(url("/api/v1/settings/integrations/frenet"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`save failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateWAHAIntegration(
+  body: Partial<WAHAIntegration>,
+): Promise<IntegrationsResponse> {
+  const res = await fetch(url("/api/v1/settings/integrations/waha"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`save failed: ${res.status}`);
+  return res.json();
+}
+
+export async function testIntegration(
+  provider: "woocommerce" | "frenet" | "waha",
+): Promise<TestResult> {
+  const res = await fetch(url(`/api/v1/settings/integrations/${provider}/test`), {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`test failed: ${res.status}`);
   return res.json();
 }
 

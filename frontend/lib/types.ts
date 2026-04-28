@@ -114,3 +114,39 @@ export interface OverviewResponse {
   overview: Overview;
   carriers: CarrierStats[];
 }
+
+export interface WooCommerceIntegration {
+  url: string;
+  consumer_key: string;
+  consumer_secret: string;
+  webhook_secret: string;
+  enabled: boolean;
+  configured: boolean;
+}
+
+export interface FrenetIntegration {
+  api_token: string;
+  panel_email: string;
+  panel_password: string;
+  enabled: boolean;
+  configured: boolean;
+}
+
+export interface WAHAIntegration {
+  url: string;
+  api_key: string;
+  enabled: boolean;
+  configured: boolean;
+}
+
+export interface IntegrationsResponse {
+  woocommerce: WooCommerceIntegration;
+  frenet: FrenetIntegration;
+  waha: WAHAIntegration;
+}
+
+export interface TestResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
+}

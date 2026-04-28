@@ -7,14 +7,18 @@ import { Button } from "@/components/ui/button";
 import { updateOrderStatus } from "@/lib/api";
 
 const OPTIONS: { value: string; label: string }[] = [
+  { value: "pending", label: "Aguardando pagamento" },
   { value: "processing", label: "Processando" },
+  { value: "separacao", label: "Em separação" },
   { value: "on-hold", label: "Em espera" },
-  { value: "shipped", label: "Enviado" },
-  { value: "in-transit", label: "Em trânsito" },
-  { value: "out-for-delivery", label: "Saiu para entrega" },
+  { value: "enviado", label: "Enviado" },
+  { value: "em-rota", label: "Saiu para entrega" },
+  { value: "entregue", label: "Entregue" },
   { value: "completed", label: "Concluído" },
   { value: "cancelled", label: "Cancelado" },
   { value: "refunded", label: "Estornado" },
+  { value: "failed", label: "Falhou" },
+  { value: "retornado", label: "Retornado" },
 ];
 
 export function ChangeStatusAction({
