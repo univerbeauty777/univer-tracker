@@ -1,102 +1,139 @@
-# Deploy — Coolify
+# Deploy — Coolify (Docker Compose)
 
-Guia para fazer o deploy do Univer Tracker no Coolify.
+Guia oficial pra subir o Univer Tracker no Coolify usando o `docker-compose.yml`
+do repositório como fonte da verdade. Toda a stack (Postgres, Redis, migrations,
+API, worker, frontend) sobe num único recurso e Coolify cuida de SSL, rede
+e auto-deploy via webhook.
 
 ## Pré-requisitos
 
-- Coolify rodando em uma VPS (ou Hetzner/Digital Ocean/etc).
-- Domínio `tracker.lizzon.com.br` apontando para o IP do Coolify.
+- Coolify ≥ 4.0 rodando numa VPS com Docker.
+- Domínios apontando para o IP do Coolify:
+  - `tracker.lizzon.com.br` — frontend
+  - `api.tracker.lizzon.com.br` — backend
+- Conta GitHub com acesso ao repositório `univerbeauty777/univer-tracker`.
 
-## Recursos a criar no Coolify
+## 1. Criar o recurso
 
-### 1. PostgreSQL 16
+1. Coolify → **Projects** → seu projeto → **+ New Resource** → **Docker Compose Empty**.
+   - Alternativa: **Public Repository** se for repo público / **Private Repository (with Github App)** com a App do Coolify instalada.
+2. Cole o repositório: `https://github.com/univerbeauty777/univer-tracker`.
+3. **Branch:** `main`.
+4. **Base directory:** `/`.
+5. **Docker Compose file location:** `/docker-compose.yml`.
+6. Salve.
 
-- **Database** → `univertracker`
-- **Username** → `univertracker`
-- **Password** → gere uma forte (32+ chars)
-- **Port** → 5432 (interno)
-- **Persistent volume** → habilitado
+Coolify lê o compose, detecta os serviços (`postgres`, `redis`, `migrate`,
+`backend`, `worker`, `frontend`) e mostra cada um na UI.
 
-Anote a `DATABASE_URL` interna do Coolify (algo como `postgresql://univertracker:***@postgres:5432/univertracker`).
+## 2. Configurar domínios
 
-### 2. Redis 7
+A mágica do Coolify acontece pelas envs `SERVICE_FQDN_BACKEND_8080` e
+`SERVICE_FQDN_FRONTEND_3000` que já estão no compose: ao definir o domínio,
+o Coolify gera os labels Traefik e provisiona SSL automaticamente.
 
-- **Persistent volume** → habilitado
-- Anote a `REDIS_URL` interna (algo como `redis://redis:6379/0`).
+- **backend** → **Domains** → `https://api.tracker.lizzon.com.br`
+- **frontend** → **Domains** → `https://tracker.lizzon.com.br`
 
-### 3. Aplicação — backend (API)
+Não defina domínio para `postgres`, `redis`, `migrate`, `worker` — eles ficam
+na rede interna `ut_internal`.
 
-- **Source:** GitHub → `univerbeauty777/univer-tracker`
-- **Branch:** `main`
-- **Build pack:** Dockerfile
-- **Base directory:** `/backend`
-- **Dockerfile target:** `api`
-- **Port:** 8080
-- **Domain:** `api.tracker.lizzon.com.br` (ou `/api/*` no mesmo domínio se usar reverse-proxy)
+## 3. Variáveis de ambiente
 
-**Variáveis de ambiente:**
+Em **Environment Variables** do recurso, cole o bloco abaixo e preencha os
+valores reais (cada `<...>` é placeholder).
 
-```
+```bash
+# Postgres
+POSTGRES_USER=univertracker
+POSTGRES_PASSWORD=<gere com `openssl rand -base64 32`>
+POSTGRES_DB=univertracker
+
+# App
 APP_ENV=production
-APP_PORT=8080
-APP_URL=https://api.tracker.lizzon.com.br
-PUBLIC_URL=https://tracker.lizzon.com.br
-DATABASE_URL=<da etapa 1>
-REDIS_URL=<da etapa 2>
-JWT_SECRET=<gerar 64+ chars>
+
+# Auth
+JWT_SECRET=<gere com `openssl rand -base64 64`>
+JWT_EXPIRES_IN=7d
+
+# WooCommerce
 WC_URL=https://lizzon.com.br
-WC_CONSUMER_KEY=<copiar do WP>
-WC_CONSUMER_SECRET=<copiar do WP>
-WC_WEBHOOK_SECRET=<gerar>
-FRENET_API_TOKEN=<copiar>
+WC_CONSUMER_KEY=<copiar do WP → WooCommerce → Settings → Advanced → REST API>
+WC_CONSUMER_SECRET=<idem>
+WC_WEBHOOK_SECRET=<gere com `openssl rand -hex 32`>
+
+# Frenet
+FRENET_API_TOKEN=<token Frenet>
+FRENET_PANEL_EMAIL=<email Frenet>
+FRENET_PANEL_PASSWORD=<senha Frenet>
+
+# ZapGrup
 ZAPGRUP_URL=https://zapgrup.cloud
-ZAPGRUP_API_TOKEN=<gerar/copiar>
+ZAPGRUP_API_TOKEN=<token ZapGrup>
 ```
 
-### 4. Aplicação — worker
+> **Importante:** Coolify resolve `SERVICE_URL_BACKEND_8080` e
+> `SERVICE_URL_FRONTEND_3000` automaticamente a partir dos domínios da
+> seção 2 — não precisa setar essas duas manualmente.
 
-- Mesmo source que a API
-- **Dockerfile target:** `worker`
-- **Sem porta exposta**
-- Mesmas variáveis de ambiente da API
+## 4. Deploy
 
-### 5. Aplicação — frontend (Next.js)
+Clique em **Deploy**. Sequência esperada:
 
-- **Source:** GitHub → `univerbeauty777/univer-tracker`
-- **Branch:** `main`
-- **Build pack:** Dockerfile
-- **Base directory:** `/frontend`
-- **Port:** 3000
-- **Domain:** `tracker.lizzon.com.br`
+1. `postgres` e `redis` sobem e ficam `healthy`.
+2. `migrate` roda `migrate up`, aplica `0001_init.up.sql` e sai com código 0.
+3. `backend` sobe, healthcheck `/healthz` passa.
+4. `worker` sobe, healthcheck `pgrep` confirma o processo.
+5. `frontend` faz build com `NEXT_PUBLIC_API_URL=https://api.tracker.lizzon.com.br`,
+   sobe e healthcheck passa.
 
-**Build args:**
+Tempo total na primeira vez: ~3–5 min (build do Go + Next.js).
+Em deploys subsequentes: ~30–60s (BuildKit cache).
 
+## 5. Verificar
+
+```bash
+curl -fsS https://api.tracker.lizzon.com.br/healthz
+# {"status":"ok","time":"..."}
+
+curl -fsS https://api.tracker.lizzon.com.br/api/v1/version
+# {"name":"univer-tracker","version":"0.1.0"}
 ```
-NEXT_PUBLIC_API_URL=https://api.tracker.lizzon.com.br
-```
 
-## Auto-deploy (webhook)
+E acesse `https://tracker.lizzon.com.br` no navegador.
 
-No Coolify, em cada aplicação:
+## 6. Auto-deploy (webhook)
 
-1. **Settings → Webhooks → GitHub**
-2. Copie a URL do webhook que o Coolify gera.
-3. No GitHub: `Settings → Webhooks → Add webhook`.
-   - Payload URL: a URL copiada.
-   - Content type: `application/json`.
-   - Trigger: `push` events.
-4. Cole a secret se o Coolify pedir.
+No recurso, **Webhook** → copie a URL gerada → no GitHub
+`Settings → Webhooks → Add webhook`:
 
-A partir disso, todo `git push origin main` dispara um redeploy automático.
+- **Payload URL:** a URL copiada
+- **Content type:** `application/json`
+- **Secret:** se o Coolify pedir, cole a mesma
+- **Events:** `Just the push event`
 
-## Deploy local (alternativa Docker Compose)
+A partir daqui todo `git push origin main` redeploya o stack.
+
+## 7. Logs e troubleshooting
+
+- **Logs por serviço:** Coolify → recurso → aba do serviço → **Logs**.
+- **Migrate falhou:** abra o log do serviço `migrate`. Se já rodou antes em
+  estado parcial, force `migrate down 1` localmente apontando pra produção
+  ou aplique `migrate force <versão>` (ver `migrate/migrate` docs).
+- **Healthcheck flapping no backend:** geralmente env var faltando. `docker
+  logs <container>` mostra `config: ... required`.
+- **CORS bloqueando frontend:** confira que `PUBLIC_URL` no backend resolveu
+  pro domínio público do frontend (deveria, via `SERVICE_URL_FRONTEND_3000`).
+
+## 8. Deploy local (dev)
 
 ```bash
 cp .env.example .env
-# preencha as variáveis
+# preencha o mínimo (POSTGRES_*, JWT_SECRET, WC_*, FRENET_*, ZAPGRUP_*)
 docker compose up -d
 ```
 
-Acesse:
 - Frontend: http://localhost:3000
 - API: http://localhost:8080/healthz
+
+Os fallbacks `localhost` nas envs `SERVICE_URL_*` cobrem o cenário de dev.
