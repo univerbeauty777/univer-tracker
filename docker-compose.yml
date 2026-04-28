@@ -72,10 +72,11 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      SERVICE_FQDN_BACKEND_8080:
       APP_ENV: ${APP_ENV:-production}
       APP_PORT: 8080
-      APP_URL: ${APP_URL}
-      PUBLIC_URL: ${PUBLIC_URL}
+      APP_URL: ${SERVICE_URL_BACKEND_8080:-http://localhost:8080}
+      PUBLIC_URL: ${SERVICE_URL_FRONTEND_3000:-http://localhost:3000}
       DATABASE_URL: postgres://${POSTGRES_USER:-univertracker}:${POSTGRES_PASSWORD:-univertracker}@postgres:5432/${POSTGRES_DB:-univertracker}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET}
@@ -88,6 +89,8 @@ services:
       FRENET_PANEL_PASSWORD: ${FRENET_PANEL_PASSWORD}
       ZAPGRUP_URL: ${ZAPGRUP_URL}
       ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
+    expose:
+      - "8080"
     networks:
       - ut_internal
 
@@ -120,12 +123,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_URL: ${SERVICE_URL_BACKEND_8080:-http://localhost:8080}
     restart: unless-stopped
     depends_on:
       - backend
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      SERVICE_FQDN_FRONTEND_3000:
+      NEXT_PUBLIC_API_URL: ${SERVICE_URL_BACKEND_8080:-http://localhost:8080}
+    expose:
+      - "3000"
     networks:
       - ut_internal
 
