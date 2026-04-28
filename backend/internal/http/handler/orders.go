@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/orders"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
@@ -19,13 +20,12 @@ import (
 
 // Orders serves the public Orders REST API.
 type Orders struct {
-	StoreID   int64
-	Orders    *store.Orders
-	Shipments *store.Shipments
-	Events    *store.Events
-	WC        *woocommerce.Client
-	Frenet    *frenet.Client
-	Log       *slog.Logger
+	StoreID     int64
+	Orders      *store.Orders
+	Shipments   *store.Shipments
+	Events      *store.Events
+	Integrations *integrations.Resolver
+	Log         *slog.Logger
 }
 
 // orderListItem is the slim shape used by the table view.
@@ -141,9 +141,15 @@ func (h *Orders) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wcOrder, err := h.WC.GetOrder(ctx, wcID)
-	if err != nil {
-		h.Log.Warn("wc get order failed", "wc_order_id", wcID, "err", err)
+	var wcOrder *woocommerce.Order
+	if wc, err := h.Integrations.WooCommerce(ctx); err == nil {
+		o, err := wc.GetOrder(ctx, wcID)
+		if err != nil {
+			h.Log.Warn("wc get order failed", "wc_order_id", wcID, "err", err)
+		}
+		wcOrder = o
+	} else {
+		h.Log.Warn("wc resolver", "err", err)
 	}
 
 	ships, err := h.Shipments.ListByOrder(ctx, dbOrder.ID)
@@ -205,13 +211,19 @@ func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := h.WC.UpdateOrderStatus(ctx, wcID, body.Status); err != nil {
+	wc, err := h.Integrations.WooCommerce(ctx)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "woocommerce não configurada — abra Configurações")
+		return
+	}
+
+	if err := wc.UpdateOrderStatus(ctx, wcID, body.Status); err != nil {
 		h.Log.Error("wc update status failed", "wc_order_id", wcID, "err", err)
 		writeError(w, http.StatusBadGateway, "could not update woocommerce")
 		return
 	}
 	if body.Note != "" {
-		if err := h.WC.AddOrderNote(ctx, wcID, body.Note, false); err != nil {
+		if err := wc.AddOrderNote(ctx, wcID, body.Note, false); err != nil {
 			h.Log.Warn("wc add note failed", "wc_order_id", wcID, "err", err)
 		}
 	}
@@ -278,6 +290,10 @@ func projectEvents(evts []store.Event) []timelineEvent {
 	return out
 }
 
+// wcStatusLabel translates a WooCommerce status slug into a Portuguese label.
+// Covers native statuses, the official UniverTracking custom ones (shipped /
+// in-transit / out-for-delivery) and the custom slugs Lizzon already uses
+// in production (separacao, enviado, em-rota, entregue, retornado).
 func wcStatusLabel(s string) string {
 	switch s {
 	case "pending":
@@ -294,14 +310,26 @@ func wcStatusLabel(s string) string {
 		return "Estornado"
 	case "failed":
 		return "Falhou"
-	case "shipped":
+	case "separacao":
+		return "Em separação"
+	case "aguardando":
+		return "Aguardando"
+	case "enviado", "shipped":
 		return "Enviado"
-	case "in-transit":
+	case "in-transit", "em-transito":
 		return "Em trânsito"
-	case "out-for-delivery":
+	case "out-for-delivery", "em-rota":
 		return "Saiu para entrega"
+	case "entregue":
+		return "Entregue"
+	case "retornado":
+		return "Retornado"
 	default:
-		return s
+		// Fall back to a Title Case version of the slug.
+		if s == "" {
+			return ""
+		}
+		return strings.ToUpper(s[:1]) + s[1:]
 	}
 }
 

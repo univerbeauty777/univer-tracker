@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
-	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/sync"
-	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 	"github.com/univerbeauty777/univer-tracker/backend/pkg/logger"
 )
 
@@ -57,23 +57,23 @@ func run() error {
 	eventsRepo := &store.Events{Pool: pool}
 	stateRepo := &store.SyncStates{Pool: pool}
 
-	wcClient := woocommerce.New(cfg.WooCommerce.URL, cfg.WooCommerce.ConsumerKey, cfg.WooCommerce.ConsumerSecret)
-	frenetClient := frenet.New(cfg.Frenet.APIToken)
+	settingsStore := settings.New(pool)
+	resolver := integrations.New(settingsStore, cfg)
 
 	wcSync := &sync.WooCommerce{
-		Store:     ordersRepo,
-		Shipments: shipmentsRepo,
-		State:     stateRepo,
-		WC:        wcClient,
-		StoreID:   defaultStoreID,
-		Log:       log,
+		Store:        ordersRepo,
+		Shipments:    shipmentsRepo,
+		State:        stateRepo,
+		Integrations: resolver,
+		StoreID:      defaultStoreID,
+		Log:          log,
 	}
 	frenetSync := &sync.Frenet{
-		Shipments: shipmentsRepo,
-		Events:    eventsRepo,
-		Client:    frenetClient,
-		BatchSize: 50,
-		Log:       log,
+		Shipments:    shipmentsRepo,
+		Events:       eventsRepo,
+		Integrations: resolver,
+		BatchSize:    50,
+		Log:          log,
 	}
 
 	stop := make(chan os.Signal, 1)

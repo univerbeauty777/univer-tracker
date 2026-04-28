@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/orders"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/sla"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
@@ -17,14 +18,15 @@ import (
 )
 
 // WooCommerce pulls orders incrementally and writes them (plus their
-// shipments) into the store.
+// shipments) into the store. It resolves credentials per-Run so a
+// settings change picks up on the next tick — no restart needed.
 type WooCommerce struct {
-	Store     *store.Orders
-	Shipments *store.Shipments
-	State     *store.SyncStates
-	WC        *woocommerce.Client
-	StoreID   int64
-	Log       *slog.Logger
+	Store        *store.Orders
+	Shipments    *store.Shipments
+	State        *store.SyncStates
+	Integrations *integrations.Resolver
+	StoreID      int64
+	Log          *slog.Logger
 }
 
 const wcSyncEntity = "wc_orders"
@@ -33,6 +35,13 @@ const wcSyncEntity = "wc_orders"
 // first run) and upserts it. Returns counts useful for logging.
 func (s *WooCommerce) Run(ctx context.Context) (Stats, error) {
 	stats := Stats{Started: time.Now()}
+
+	wc, err := s.Integrations.WooCommerce(ctx)
+	if err != nil {
+		s.Log.Warn("wc sync skipped: not configured", "err", err)
+		stats.Finished = time.Now()
+		return stats, nil
+	}
 
 	since := time.Now().Add(-30 * 24 * time.Hour)
 	if state, err := s.State.Get(ctx, wcSyncEntity); err == nil && state.LastSyncedAt != nil {
@@ -43,7 +52,7 @@ func (s *WooCommerce) Run(ctx context.Context) (Stats, error) {
 
 	page := 1
 	for {
-		batch, err := s.WC.ListOrders(ctx, woocommerce.ListOrdersParams{
+		batch, err := wc.ListOrders(ctx, woocommerce.ListOrdersParams{
 			Modified: since,
 			PerPage:  100,
 			Page:     page,

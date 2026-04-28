@@ -9,17 +9,20 @@ import (
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/sla"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 )
 
-// Frenet pulls events for active shipments and persists them.
+// Frenet pulls events for active shipments and persists them. The client
+// is resolved fresh on every Run so dashboard credential changes take
+// effect on the next tick without a worker restart.
 type Frenet struct {
-	Shipments *store.Shipments
-	Events    *store.Events
-	Client    *frenet.Client
-	BatchSize int
-	Log       *slog.Logger
+	Shipments    *store.Shipments
+	Events       *store.Events
+	Integrations *integrations.Resolver
+	BatchSize    int
+	Log          *slog.Logger
 }
 
 // Run picks the shipments with the oldest last_synced_at and refreshes them
@@ -28,8 +31,11 @@ type Frenet struct {
 func (s *Frenet) Run(ctx context.Context) (Stats, error) {
 	stats := Stats{Started: time.Now()}
 
-	if s.Client == nil {
-		return stats, fmt.Errorf("frenet client not configured")
+	client, err := s.Integrations.Frenet(ctx)
+	if err != nil {
+		s.Log.Warn("frenet sync skipped: not configured", "err", err)
+		stats.Finished = time.Now()
+		return stats, nil
 	}
 
 	limit := s.BatchSize
@@ -43,7 +49,7 @@ func (s *Frenet) Run(ctx context.Context) (Stats, error) {
 	}
 
 	for i := range active {
-		if err := s.refreshOne(ctx, &active[i]); err != nil {
+		if err := s.refreshOne(ctx, client, &active[i]); err != nil {
 			stats.Errors++
 			s.Log.Warn("refresh shipment failed",
 				"shipment_id", active[i].ID,
@@ -65,11 +71,11 @@ func (s *Frenet) Run(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-func (s *Frenet) refreshOne(ctx context.Context, ship *store.Shipment) error {
+func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *store.Shipment) error {
 	rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	resp, err := s.Client.GetTrackingInfo(rctx, ship.TrackingCode, ship.ServiceCode)
+	resp, err := client.GetTrackingInfo(rctx, ship.TrackingCode, ship.ServiceCode)
 	if err != nil {
 		return err
 	}

@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
-	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/http/handler"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
-	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 )
 
 const defaultStoreID = int64(1)
@@ -26,17 +26,16 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	mux.HandleFunc("GET /readyz", readyHandler(pool))
 	mux.HandleFunc("GET /api/v1/version", versionHandler)
 
-	wc := woocommerce.New(cfg.WooCommerce.URL, cfg.WooCommerce.ConsumerKey, cfg.WooCommerce.ConsumerSecret)
-	fc := frenet.New(cfg.Frenet.APIToken)
+	settingsStore := settings.New(pool)
+	resolver := integrations.New(settingsStore, cfg)
 
 	orders := &handler.Orders{
-		StoreID:   defaultStoreID,
-		Orders:    &store.Orders{Pool: pool},
-		Shipments: &store.Shipments{Pool: pool},
-		Events:    &store.Events{Pool: pool},
-		WC:        wc,
-		Frenet:    fc,
-		Log:       log,
+		StoreID:      defaultStoreID,
+		Orders:       &store.Orders{Pool: pool},
+		Shipments:    &store.Shipments{Pool: pool},
+		Events:       &store.Events{Pool: pool},
+		Integrations: resolver,
+		Log:          log,
 	}
 	mux.HandleFunc("GET /api/v1/orders", orders.List)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orders.Get)
@@ -47,6 +46,19 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 		Log:  log,
 	}
 	mux.HandleFunc("GET /api/v1/analytics/overview", analytics.Overview)
+
+	settingsH := &handler.Settings{
+		Store:    settingsStore,
+		Resolver: resolver,
+		Log:      log,
+	}
+	mux.HandleFunc("GET /api/v1/settings/integrations", settingsH.Get)
+	mux.HandleFunc("PATCH /api/v1/settings/integrations/woocommerce", settingsH.UpdateWooCommerce)
+	mux.HandleFunc("PATCH /api/v1/settings/integrations/frenet", settingsH.UpdateFrenet)
+	mux.HandleFunc("PATCH /api/v1/settings/integrations/waha", settingsH.UpdateWAHA)
+	mux.HandleFunc("POST /api/v1/settings/integrations/woocommerce/test", settingsH.TestWooCommerce)
+	mux.HandleFunc("POST /api/v1/settings/integrations/frenet/test", settingsH.TestFrenet)
+	mux.HandleFunc("POST /api/v1/settings/integrations/waha/test", settingsH.TestWAHA)
 
 	return loggingMiddleware(log)(corsMiddleware(cfg.App.PublicURL)(mux))
 }
@@ -76,7 +88,7 @@ func readyHandler(pool *pgxpool.Pool) http.HandlerFunc {
 func versionHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":    "univer-tracker",
-		"version": "0.2.0",
+		"version": "0.3.0",
 	})
 }
 
