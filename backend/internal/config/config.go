@@ -17,7 +17,7 @@ type Config struct {
 	Auth        Auth
 	WooCommerce WooCommerce
 	Frenet      Frenet
-	ZapGrup     ZapGrup
+	WAHA        WAHA
 }
 
 type App struct {
@@ -56,9 +56,11 @@ type Frenet struct {
 	PanelPassword string
 }
 
-type ZapGrup struct {
-	URL      string
-	APIToken string
+// WAHA is the WhatsApp HTTP API gateway (we use ZapGrup's hosted WAHA
+// in production, but the contract is the open WAHA REST API).
+type WAHA struct {
+	URL    string
+	APIKey string
 }
 
 // Load reads configuration from environment and validates it.
@@ -94,9 +96,9 @@ func Load() (*Config, error) {
 			PanelEmail:    getEnv("FRENET_PANEL_EMAIL", ""),
 			PanelPassword: getEnv("FRENET_PANEL_PASSWORD", ""),
 		},
-		ZapGrup: ZapGrup{
-			URL:      getEnv("ZAPGRUP_URL", ""),
-			APIToken: getEnv("ZAPGRUP_API_TOKEN", ""),
+		WAHA: WAHA{
+			URL:    getEnv("WAHA_URL", ""),
+			APIKey: getEnv("WAHA_API_KEY", ""),
 		},
 	}
 

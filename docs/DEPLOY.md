@@ -67,9 +67,9 @@ FRENET_API_TOKEN=<token Frenet>
 FRENET_PANEL_EMAIL=<email Frenet>
 FRENET_PANEL_PASSWORD=<senha Frenet>
 
-# ZapGrup
-ZAPGRUP_URL=https://zapgrup.cloud
-ZAPGRUP_API_TOKEN=<token ZapGrup>
+# WAHA (gateway WhatsApp; ZapGrup hospeda nossa instância)
+WAHA_URL=https://zapgrup.univerzap.cloud
+WAHA_API_KEY=<chave do painel WAHA>
 ```
 
 > **Importante:** Coolify resolve `SERVICE_URL_BACKEND_8080` e
@@ -129,7 +129,7 @@ A partir daqui todo `git push origin main` redeploya o stack.
 
 ```bash
 cp .env.example .env
-# preencha o mínimo (POSTGRES_*, JWT_SECRET, WC_*, FRENET_*, ZAPGRUP_*)
+# preencha o mínimo (POSTGRES_*, JWT_SECRET, WC_*, FRENET_*, WAHA_*)
 docker compose up -d
 ```
 

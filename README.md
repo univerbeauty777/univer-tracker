@@ -20,7 +20,7 @@ Sistema de logística inteligente para e-commerces — rastreamento, automação
 │  ↓                                                        │
 │  Postgres + Redis                                        │
 │  ↑                                                        │
-│  WooCommerce ←→ Frenet ←→ ZapGrup                        │
+│  WooCommerce ←→ Frenet ←→ WAHA (WhatsApp)                │
 └──────────────────────────────────────────────────────────┘
 ```
 

@@ -98,8 +98,8 @@ services:
       FRENET_API_TOKEN: ${FRENET_API_TOKEN}
       FRENET_PANEL_EMAIL: ${FRENET_PANEL_EMAIL}
       FRENET_PANEL_PASSWORD: ${FRENET_PANEL_PASSWORD}
-      ZAPGRUP_URL: ${ZAPGRUP_URL}
-      ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
+      WAHA_URL: ${WAHA_URL}
+      WAHA_API_KEY: ${WAHA_API_KEY}
     expose:
       - "8080"
     networks:
@@ -129,8 +129,8 @@ services:
       WC_CONSUMER_KEY: ${WC_CONSUMER_KEY}
       WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
       FRENET_API_TOKEN: ${FRENET_API_TOKEN}
-      ZAPGRUP_URL: ${ZAPGRUP_URL}
-      ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
+      WAHA_URL: ${WAHA_URL}
+      WAHA_API_KEY: ${WAHA_API_KEY}
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f /app/worker > /dev/null || exit 1"]
       interval: 30s

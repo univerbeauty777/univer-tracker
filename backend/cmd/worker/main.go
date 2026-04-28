@@ -1,5 +1,5 @@
 // Command worker runs background jobs for Univer Tracker
-// (Frenet polling, status sync, ZapGrup notifications).
+// (Frenet polling, status sync, WhatsApp notifications via WAHA).
 package main
 
 import (
