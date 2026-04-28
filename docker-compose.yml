@@ -42,6 +42,22 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    image: migrate/migrate:v4.18.1
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database
+      - postgres://${POSTGRES_USER:-univertracker}:${POSTGRES_PASSWORD:-univertracker}@postgres:5432/${POSTGRES_DB:-univertracker}?sslmode=disable
+      - up
+    networks:
+      - ut_internal
+
   backend:
     build:
       context: ./backend
@@ -53,6 +69,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_PORT: 8080
