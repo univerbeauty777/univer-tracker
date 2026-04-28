@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/orders"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/sla"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 )
@@ -91,7 +92,9 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 		ServiceCode:  tracking.ServiceCode,
 		Status:       "created",
 		Health:       "unknown",
+		CreatedAt:    dbOrder.CreatedAt,
 	}
+	sla.Apply(ship, sla.Compute(ship, time.Now().UTC()))
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/sla"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 )
 
@@ -128,6 +129,8 @@ func (s *Frenet) refreshOne(ctx context.Context, ship *store.Shipment) error {
 			ship.DeliveredAt = &t
 		}
 	}
+
+	sla.Apply(ship, sla.Compute(ship, time.Now().UTC()))
 
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)

@@ -42,6 +42,12 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	mux.HandleFunc("GET /api/v1/orders/{id}", orders.Get)
 	mux.HandleFunc("PATCH /api/v1/orders/{id}/status", orders.UpdateStatus)
 
+	analytics := &handler.Analytics{
+		Repo: &store.Analytics{Pool: pool},
+		Log:  log,
+	}
+	mux.HandleFunc("GET /api/v1/analytics/overview", analytics.Overview)
+
 	return loggingMiddleware(log)(corsMiddleware(cfg.App.PublicURL)(mux))
 }
 
