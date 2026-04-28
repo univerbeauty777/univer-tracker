@@ -65,8 +65,12 @@ ENTRYPOINT ["/app/worker"]
 # Migrate runtime — bakes migrations into the image so we don't need a
 # host bind mount (Coolify runs compose inside a helper container, so
 # relative-path mounts resolve to a path that does not exist on the
-# Docker daemon's host).
+# Docker daemon's host). The custom entrypoint auto-recovers from a
+# dirty migration left over from a failed previous run.
 # =============================================================================
 FROM migrate/migrate:v4.18.1 AS migrate
 
 COPY migrations /migrations
+COPY --chmod=755 migrate-entrypoint.sh /usr/local/bin/migrate-up
+
+ENTRYPOINT ["/usr/local/bin/migrate-up"]

@@ -62,10 +62,7 @@ services:
       postgres:
         condition: service_healthy
     command:
-      - -path=/migrations
-      - -database
       - postgres://${POSTGRES_USER:-univertracker}:${POSTGRES_PASSWORD:-univertracker}@postgres:5432/${POSTGRES_DB:-univertracker}?sslmode=disable
-      - up
     networks:
       - ut_internal
 
