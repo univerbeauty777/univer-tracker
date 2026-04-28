@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+bin/
+tmp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+*~
+
+# Testing
+coverage/
+*.coverprofile
+.nyc_output/
+
+# Go
+*.test
+*.out
+
+# Database
+*.sqlite
+*.db
+postgres-data/
+redis-data/
+
+# Sensitive
+*.pem
+*.key
+*.crt
+secrets/
+
+# Misc
+.turbo/
+.cache/
