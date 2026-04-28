@@ -1,31 +1,41 @@
+# Univer Tracker — production stack
+#
+# Designed for deployment via Coolify "Docker Compose" resource.
+# Coolify will inject SERVICE_FQDN_* magic variables when domains
+# are configured on the API and frontend services (see docs/DEPLOY.md).
+#
+# Local development: `docker compose up -d` after `cp .env.example .env`.
+
+networks:
+  ut_internal:
+    driver: bridge
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: ut_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-univertracker}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-univertracker}
       POSTGRES_DB: ${POSTGRES_DB:-univertracker}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ut_internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-univertracker}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-univertracker} -d ${POSTGRES_DB:-univertracker}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: ut_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    networks:
+      - ut_internal
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,7 +46,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: ut_backend
+      target: api
     restart: unless-stopped
     depends_on:
       postgres:
@@ -46,6 +56,8 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_PORT: 8080
+      APP_URL: ${APP_URL}
+      PUBLIC_URL: ${PUBLIC_URL}
       DATABASE_URL: postgres://${POSTGRES_USER:-univertracker}:${POSTGRES_PASSWORD:-univertracker}@postgres:5432/${POSTGRES_DB:-univertracker}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET}
@@ -54,17 +66,18 @@ services:
       WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
       WC_WEBHOOK_SECRET: ${WC_WEBHOOK_SECRET}
       FRENET_API_TOKEN: ${FRENET_API_TOKEN}
+      FRENET_PANEL_EMAIL: ${FRENET_PANEL_EMAIL}
+      FRENET_PANEL_PASSWORD: ${FRENET_PANEL_PASSWORD}
       ZAPGRUP_URL: ${ZAPGRUP_URL}
       ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
-    ports:
-      - "8080:8080"
+    networks:
+      - ut_internal
 
   worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
       target: worker
-    container_name: ut_worker
     restart: unless-stopped
     depends_on:
       postgres:
@@ -79,6 +92,10 @@ services:
       WC_CONSUMER_KEY: ${WC_CONSUMER_KEY}
       WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
       FRENET_API_TOKEN: ${FRENET_API_TOKEN}
+      ZAPGRUP_URL: ${ZAPGRUP_URL}
+      ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
+    networks:
+      - ut_internal
 
   frontend:
     build:
@@ -86,14 +103,13 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
-    container_name: ut_frontend
     restart: unless-stopped
     depends_on:
       - backend
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
-    ports:
-      - "3000:3000"
+    networks:
+      - ut_internal
 
 volumes:
   postgres_data:
