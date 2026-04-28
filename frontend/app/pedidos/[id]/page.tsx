@@ -1,14 +1,19 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, MapPin, Package, ExternalLink, Activity } from "lucide-react";
+import { ArrowLeft, ExternalLink, MapPin, Package } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
 import { HealthBadge } from "@/components/health-badge";
 import { SlaTracker } from "@/components/sla-tracker";
 import { DeliveryProgress } from "@/components/delivery-progress";
 import { ChangeStatusAction } from "@/components/change-status-action";
+import { CopyButton } from "@/components/copy-button";
+import { NotifyAction } from "@/components/notify-action";
+import { OrderHistory } from "@/components/order-history";
+import { RiskRing } from "@/components/risk-ring";
 import { fetchOrder } from "@/lib/api";
-import { dedupeName, formatBRL, formatDate, formatDateTime, formatRelative } from "@/lib/format";
+import { dedupeName, formatBRL, formatDate, formatDateTime } from "@/lib/format";
 import type { Health, ShipmentStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +62,19 @@ export default async function OrderDetailPage({
               health={order.tracking.health as Health}
               label={order.tracking.health_label}
             />
+            <NotifyAction
+              hasPhone={Boolean(order.phone)}
+              context={{
+                orderId: order.id,
+                firstName: dedupeName(order.customer_name).split(" ")[0] || "cliente",
+                tracking: order.tracking.number,
+                trackUrl: order.tracking.url,
+                lastEvent: order.tracking.last_event,
+                eta: order.tracking.estimated_delivery
+                  ? formatDate(order.tracking.estimated_delivery)
+                  : undefined,
+              }}
+            />
             <ChangeStatusAction orderId={order.id} currentStatus={order.status} />
           </div>
         </div>
@@ -75,27 +93,33 @@ export default async function OrderDetailPage({
               {order.tracking.number ? (
                 <div className="space-y-5">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 p-4">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                         Código
                       </div>
-                      <div className="font-mono text-sm font-medium">{order.tracking.number}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-sm font-medium">{order.tracking.number}</span>
+                        <CopyButton value={order.tracking.number} />
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {order.tracking.carrier || "transportadora desconhecida"}
                         {order.tracking.service ? ` · ${order.tracking.service}` : ""}
                       </div>
                     </div>
-                    {order.tracking.url ? (
-                      <a
-                        href={order.tracking.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        Rastrear no site
-                        <ExternalLink className="size-3" />
-                      </a>
-                    ) : null}
+                    <div className="flex items-center gap-3">
+                      <RiskRing score={order.tracking.risk_score} />
+                      {order.tracking.url ? (
+                        <a
+                          href={order.tracking.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          Rastrear no site
+                          <ExternalLink className="size-3" />
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
 
                   <DeliveryProgress status={order.tracking.status as ShipmentStatus} />
@@ -107,8 +131,7 @@ export default async function OrderDetailPage({
                     health={order.tracking.health as Health}
                   />
 
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <SlaStat label="Risco" value={`${order.tracking.risk_score}/100`} icon={Activity} />
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <SlaStat
                       label="Sem evento há"
                       value={
@@ -244,6 +267,10 @@ export default async function OrderDetailPage({
               ) : null}
             </CardContent>
           </Card>
+
+          <Suspense fallback={null}>
+            <OrderHistory orderId={order.id} />
+          </Suspense>
         </div>
       </div>
     </div>
@@ -253,18 +280,13 @@ export default async function OrderDetailPage({
 function SlaStat({
   label,
   value,
-  icon: Icon,
 }: {
   label: string;
   value: string;
-  icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
     <div className="rounded-lg border border-border/60 bg-card p-3">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {Icon ? <Icon className="size-3" /> : null}
-        {label}
-      </div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1 font-display text-base font-semibold">{value}</div>
     </div>
   );

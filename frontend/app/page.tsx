@@ -8,6 +8,9 @@ import {
   Truck,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { ExportButton } from "@/components/export-button";
+import { Kpi, absDelta, pctDelta } from "@/components/kpi";
+import { LastSyncBanner } from "@/components/last-sync-banner";
 import { OrdersFilterBar } from "@/components/orders-filter-bar";
 import { OrdersTable } from "@/components/orders-table";
 import { fetchFacets, fetchOrders, fetchOverview } from "@/lib/api";
@@ -22,7 +25,6 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 export default async function DashboardPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const get = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
-
   const offset = Number(get("offset") ?? 0) || 0;
 
   const query = {
@@ -61,6 +63,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     err = e instanceof Error ? e.message : String(e);
   }
 
+  const prev = overview?.previous_period;
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
       <div>
@@ -70,14 +74,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
         </p>
       </div>
 
+      <LastSyncBanner />
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Kpi label="Pedidos (30d)" value={overview?.total_30d ?? 0} icon={Package} tone="text-foreground" />
+        <Kpi
+          label="Pedidos (30d)"
+          value={overview?.total_30d ?? 0}
+          icon={Package}
+          delta={prev ? pctDelta(overview?.total_30d ?? 0, prev.total_30d) : null}
+        />
         <Kpi
           label="No prazo"
           value={`${Math.round((overview?.on_time_rate ?? 0) * 100)}%`}
           hint={`${overview?.on_time_30d ?? 0}/${overview?.delivered_30d ?? 0} entregues`}
           icon={TrendingUp}
-          tone="text-success"
+          tone="success"
+          delta={prev ? absDelta(overview?.on_time_rate ?? 0, prev.on_time_rate) : null}
         />
         <Kpi
           label="Tempo médio"
@@ -88,11 +100,35 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
           }
           hint={overview && overview.avg_delivery_days > 0 ? "do pago à entrega" : "sem entregas concluídas"}
           icon={Timer}
-          tone="text-info"
+          tone="info"
+          delta={
+            prev && overview && overview.avg_delivery_days > 0 && prev.avg_delivery_days > 0
+              ? pctDelta(overview.avg_delivery_days, prev.avg_delivery_days)
+              : null
+          }
+          positiveIsGood={false}
         />
-        <Kpi label="Em risco" value={overview?.at_risk ?? 0} icon={AlertTriangle} tone="text-warning" />
-        <Kpi label="SLA quebrado" value={overview?.breached ?? 0} icon={AlertTriangle} tone="text-destructive" />
-        <Kpi label="Sem evento >4d" value={overview?.idle_alarms ?? 0} icon={Clock} tone="text-warning" />
+        <Kpi
+          label="Em risco"
+          value={overview?.at_risk ?? 0}
+          icon={AlertTriangle}
+          tone="warning"
+          positiveIsGood={false}
+        />
+        <Kpi
+          label="SLA quebrado"
+          value={overview?.breached ?? 0}
+          icon={AlertTriangle}
+          tone="destructive"
+          positiveIsGood={false}
+        />
+        <Kpi
+          label="Sem evento >4d"
+          value={overview?.idle_alarms ?? 0}
+          icon={Clock}
+          tone="warning"
+          positiveIsGood={false}
+        />
       </div>
 
       {carriers.length > 0 ? (
@@ -139,7 +175,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
         </Card>
       ) : null}
 
-      <OrdersFilterBar facets={facets} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <OrdersFilterBar facets={facets} />
+        <ExportButton />
+      </div>
 
       {err ? (
         <Card>
@@ -152,34 +191,5 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
         <OrdersTable orders={orders} total={total} limit={query.per_page} offset={query.offset} />
       )}
     </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  hint?: string;
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-  tone: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-secondary">
-          <Icon className={`size-[18px] ${tone}`} strokeWidth={2} />
-        </div>
-        <div className="mt-3">
-          <div className={`font-display text-2xl font-semibold ${tone}`}>{value}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
-          {hint ? <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div> : null}
-        </div>
-      </CardContent>
-    </Card>
   );
 }

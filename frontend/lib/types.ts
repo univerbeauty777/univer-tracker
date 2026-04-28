@@ -107,6 +107,14 @@ export interface Facets {
   health: FacetValue[];
 }
 
+export interface PreviousPeriod {
+  total_30d: number;
+  delivered_30d: number;
+  on_time_30d: number;
+  on_time_rate: number;
+  avg_delivery_days: number;
+}
+
 export interface Overview {
   total_30d: number;
   delivered_30d: number;
@@ -116,6 +124,7 @@ export interface Overview {
   breached: number;
   avg_delivery_days: number;
   idle_alarms: number;
+  previous_period?: PreviousPeriod;
 }
 
 export interface CarrierStats {
@@ -164,4 +173,41 @@ export interface TestResult {
   ok: boolean;
   message?: string;
   error?: string;
+}
+
+export interface SyncSource {
+  entity: string;
+  last_synced_at: string | null;
+  seconds_ago: number;
+}
+
+export interface SyncStatusResponse {
+  sources: SyncSource[];
+}
+
+export interface StatusChange {
+  id: number;
+  order_id: number;
+  from_status: string;
+  to_status: string;
+  source: string;
+  note: string;
+  actor: string;
+  created_at: string;
+}
+
+export interface OrderNotification {
+  id: number;
+  order_id: number;
+  channel: string;
+  template: string;
+  payload?: Record<string, unknown>;
+  status: string;
+  error?: string;
+  sent_at: string;
+}
+
+export interface OrderHistoryResponse {
+  changes: StatusChange[];
+  notifications: OrderNotification[];
 }

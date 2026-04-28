@@ -3,8 +3,10 @@ import type {
   FrenetIntegration,
   IntegrationsResponse,
   OrderDetail,
+  OrderHistoryResponse,
   OrdersResponse,
   OverviewResponse,
+  SyncStatusResponse,
   TestResult,
   WAHAIntegration,
   WooCommerceIntegration,
@@ -58,6 +60,40 @@ export async function fetchFacets(): Promise<Facets> {
   const res = await fetch(url("/api/v1/orders/facets"), { cache: "no-store" });
   if (!res.ok) throw new Error(`facets fetch failed: ${res.status}`);
   return res.json();
+}
+
+export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
+  const res = await fetch(url("/api/v1/sync/status"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`sync status failed: ${res.status}`);
+  return res.json();
+}
+
+export async function triggerSync(): Promise<void> {
+  const res = await fetch(url("/api/v1/sync/run"), { method: "POST" });
+  if (!res.ok) throw new Error(`sync trigger failed: ${res.status}`);
+}
+
+export async function fetchOrderHistory(id: number): Promise<OrderHistoryResponse> {
+  const res = await fetch(url(`/api/v1/orders/${id}/history`), { cache: "no-store" });
+  if (!res.ok) throw new Error(`history fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function notifyOrder(
+  id: number,
+  message: string,
+  template?: string,
+): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const res = await fetch(url(`/api/v1/orders/${id}/notify`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, template }),
+  });
+  return res.json();
+}
+
+export function ordersExportURL(params: Record<string, string | undefined>): string {
+  return url("/api/v1/orders/export.csv", params);
 }
 
 export async function fetchOverview(): Promise<OverviewResponse> {
