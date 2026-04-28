@@ -60,3 +60,13 @@ COPY --from=builder /out/worker /app/worker
 USER app
 
 ENTRYPOINT ["/app/worker"]
+
+# =============================================================================
+# Migrate runtime — bakes migrations into the image so we don't need a
+# host bind mount (Coolify runs compose inside a helper container, so
+# relative-path mounts resolve to a path that does not exist on the
+# Docker daemon's host).
+# =============================================================================
+FROM migrate/migrate:v4.18.1 AS migrate
+
+COPY migrations /migrations

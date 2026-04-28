@@ -53,13 +53,14 @@ services:
           cpus: "0.5"
 
   migrate:
-    image: migrate/migrate:v4.18.1
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrate
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./backend/migrations:/migrations:ro
     command:
       - -path=/migrations
       - -database
