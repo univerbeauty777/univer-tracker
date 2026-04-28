@@ -11,11 +11,12 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml* package-lock.json* yarn.lock* ./
 
-RUN \
-  if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
-  else npm install; fi
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/root/.local/share/pnpm \
+    if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; \
+    elif [ -f package-lock.json ]; then npm ci; \
+    elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
+    else npm install; fi
 
 # =============================================================================
 # Build stage
@@ -33,15 +34,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN \
-  if [ -f pnpm-lock.yaml ]; then pnpm build; \
-  elif [ -f yarn.lock ]; then yarn build; \
-  else npm run build; fi
+RUN --mount=type=cache,target=/app/.next/cache \
+    if [ -f pnpm-lock.yaml ]; then pnpm build; \
+    elif [ -f yarn.lock ]; then yarn build; \
+    else npm run build; fi
 
 # =============================================================================
 # Runtime stage
 # =============================================================================
 FROM node:22-alpine AS runner
+
+RUN apk add --no-cache curl
 
 WORKDIR /app
 
@@ -62,6 +65,6 @@ USER nextjs
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -qO- http://localhost:3000/ || exit 1
+    CMD curl -fsS http://localhost:3000/ || exit 1
 
 CMD ["node", "server.js"]
