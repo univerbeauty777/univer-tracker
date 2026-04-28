@@ -27,6 +27,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
   redis:
     image: redis:7-alpine
@@ -41,6 +46,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
 
   migrate:
     image: migrate/migrate:v4.18.1
@@ -93,6 +103,11 @@ services:
       - "8080"
     networks:
       - ut_internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
 
   worker:
     build:
@@ -115,8 +130,19 @@ services:
       FRENET_API_TOKEN: ${FRENET_API_TOKEN}
       ZAPGRUP_URL: ${ZAPGRUP_URL}
       ZAPGRUP_API_TOKEN: ${ZAPGRUP_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f /app/worker > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - ut_internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
 
   frontend:
     build:
@@ -134,6 +160,11 @@ services:
       - "3000"
     networks:
       - ut_internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
 
 volumes:
   postgres_data:
