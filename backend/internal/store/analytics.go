@@ -33,6 +33,10 @@ type CarrierStats struct {
 }
 
 // FetchOverview computes the headline KPIs in a single query.
+//
+// Counts only shipments with a tracking_code: orders we can't track are
+// not "in the funnel" — counting them as breached/idle would inflate
+// the alerts and hide the real problems.
 func (a *Analytics) FetchOverview(ctx context.Context) (*Overview, error) {
 	const q = `
 SELECT
@@ -51,8 +55,14 @@ SELECT
         FILTER (WHERE delivered_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
         0
     )                                                                                                          AS avg_delivery_days,
-    COUNT(*) FILTER (WHERE idle_since IS NOT NULL AND idle_since < NOW() - INTERVAL '4 days' AND delivered_at IS NULL) AS idle_alarms
-FROM shipments`
+    COUNT(*) FILTER (
+        WHERE idle_since IS NOT NULL
+          AND idle_since < NOW() - INTERVAL '4 days'
+          AND delivered_at IS NULL
+          AND last_event_at IS NOT NULL
+    )                                                                                                          AS idle_alarms
+FROM shipments
+WHERE tracking_code <> ''`
 
 	var o Overview
 	err := a.Pool.QueryRow(ctx, q).Scan(
@@ -85,6 +95,8 @@ SELECT
     ) AS avg_days
 FROM shipments
 WHERE created_at >= NOW() - INTERVAL '30 days'
+  AND tracking_code <> ''
+  AND carrier <> ''
 GROUP BY 1
 ORDER BY total DESC
 LIMIT $1`

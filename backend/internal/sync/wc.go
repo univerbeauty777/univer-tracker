@@ -94,16 +94,30 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 	if !tracking.HasTracking() {
 		return nil
 	}
+
+	// If the order doesn't expose a carrier in meta, fall back to the
+	// shipping method title — it usually contains "Correios PAC", "SEDEX"
+	// etc., enough for the SLA mapping.
+	carrier := tracking.Carrier
+	if carrier == "" && len(w.ShippingLines) > 0 {
+		carrier = inferCarrierFromMethod(w.ShippingLines[0].MethodTitle)
+	}
+
+	// SLA window starts the moment we link the tracking, not when the order
+	// was placed — pre-existing orders synced for the first time were being
+	// flagged as breached because their ETA had "already passed" by the time
+	// we saw them.
+	now := time.Now().UTC()
 	ship := &store.Shipment{
 		OrderID:      dbOrder.ID,
 		TrackingCode: strings.ToUpper(strings.ReplaceAll(tracking.Number, " ", "")),
-		Carrier:      tracking.Carrier,
+		Carrier:      carrier,
 		ServiceCode:  tracking.ServiceCode,
 		Status:       "created",
 		Health:       "unknown",
-		CreatedAt:    dbOrder.CreatedAt,
+		CreatedAt:    now,
 	}
-	sla.Apply(ship, sla.Compute(ship, time.Now().UTC()))
+	sla.Apply(ship, sla.Compute(ship, now))
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
 	}
@@ -113,11 +127,11 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 // mapOrder projects WooCommerce → store.Order, preferring shipping address
 // fields and falling back to billing.
 func mapOrder(w *woocommerce.Order, storeID int64) *store.Order {
-	name := strings.TrimSpace(w.Shipping.FirstName + " " + w.Shipping.LastName)
+	name := buildName(w.Shipping.FirstName, w.Shipping.LastName)
 	city := w.Shipping.City
 	uf := w.Shipping.State
 	if name == "" {
-		name = strings.TrimSpace(w.Billing.FirstName + " " + w.Billing.LastName)
+		name = buildName(w.Billing.FirstName, w.Billing.LastName)
 	}
 	if city == "" {
 		city = w.Billing.City
@@ -151,6 +165,51 @@ func mapOrder(w *woocommerce.Order, storeID int64) *store.Order {
 		o.CreatedAt = time.Now().UTC()
 	}
 	return o
+}
+
+// inferCarrierFromMethod parses a WooCommerce shipping_method title into a
+// carrier+service slug we can pass to the SLA table. Recognises Correios
+// SEDEX/PAC, Jadlog, Loggi and a couple of others; otherwise returns the
+// raw title so the dashboard at least shows something useful.
+func inferCarrierFromMethod(title string) string {
+	t := strings.ToLower(title)
+	switch {
+	case strings.Contains(t, "sedex"):
+		return "Correios - SEDEX"
+	case strings.Contains(t, "pac"):
+		return "Correios - PAC"
+	case strings.Contains(t, "correios"):
+		return "Correios"
+	case strings.Contains(t, "jadlog"):
+		return "Jadlog"
+	case strings.Contains(t, "loggi"):
+		return "Loggi"
+	case strings.Contains(t, "azul"):
+		return "Azul Cargo"
+	case strings.Contains(t, "total"):
+		return "Total Express"
+	case strings.Contains(t, "braspress"):
+		return "Braspress"
+	case strings.Contains(t, "dhl"):
+		return "DHL"
+	case strings.Contains(t, "fedex"):
+		return "FedEx"
+	}
+	return strings.TrimSpace(title)
+}
+
+// buildName joins first + last name, skipping the second part when the
+// store puts the full name in both fields (a common WC theme bug).
+func buildName(first, last string) string {
+	f := strings.TrimSpace(first)
+	l := strings.TrimSpace(last)
+	if f == "" {
+		return l
+	}
+	if l == "" || strings.EqualFold(f, l) || strings.HasSuffix(strings.ToLower(f), strings.ToLower(l)) {
+		return f
+	}
+	return f + " " + l
 }
 
 // Stats reports the work done by a single sync pass.
