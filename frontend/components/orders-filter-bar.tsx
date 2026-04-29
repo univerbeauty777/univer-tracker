@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import { Calendar, ChevronDown, Filter, Truck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ const RANGE_PRESETS: { key: string; label: string; days: number | null }[] = [
 
 export function OrdersFilterBar({ facets }: { facets: Facets }) {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const [pending, start] = useTransition();
 
@@ -40,7 +41,8 @@ export function OrdersFilterBar({ facets }: { facets: Facets }) {
       else sp.set(k, v);
     }
     sp.delete("offset");
-    start(() => router.push(`/?${sp.toString()}`));
+    const qs = sp.toString();
+    start(() => router.push(qs ? `${pathname}?${qs}` : pathname));
   }
 
   function applyRange(days: number | null) {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { SlaBadge } from "@/components/sla-badge";
@@ -26,9 +26,15 @@ export function OrdersTable({
   offset: number;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const sort = (params.get("sort") || "created_at") as SortKey;
   const dir = (params.get("dir") || "desc") as SortDir;
+
+  const pushParams = (sp: URLSearchParams) => {
+    const qs = sp.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
+  };
 
   function setSort(k: SortKey) {
     const sp = new URLSearchParams(params.toString());
@@ -39,14 +45,14 @@ export function OrdersTable({
       sp.set("dir", k === "total" || k === "created_at" ? "desc" : "asc");
     }
     sp.delete("offset");
-    router.push(`/?${sp.toString()}`);
+    pushParams(sp);
   }
 
   function setOffset(next: number) {
     const sp = new URLSearchParams(params.toString());
     if (next <= 0) sp.delete("offset");
     else sp.set("offset", String(next));
-    router.push(`/?${sp.toString()}`);
+    pushParams(sp);
   }
 
   const start = total === 0 ? 0 : offset + 1;
