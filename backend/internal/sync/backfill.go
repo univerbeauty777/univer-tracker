@@ -22,8 +22,25 @@ type BackfillStages struct {
 	Log       *slog.Logger
 }
 
-// Run replays events for every shipment with a tracking_code.
+// Run replays events for every shipment with a tracking_code. It first
+// nulls out the stage stamps so any earlier mapping bug (e.g. "Etiqueta
+// emitida - Aguardando postagem" landing on preparing_at) gets fully
+// repaired from the events table on every deploy. delivered_at is left
+// alone — that's authoritative from WC's "completed" status, not events.
 func (b *BackfillStages) Run(ctx context.Context) (int, error) {
+	if _, err := b.Pool.Exec(ctx, `
+UPDATE shipments SET
+    label_issued_at = NULL,
+    preparing_at = NULL,
+    ready_for_pickup_at = NULL,
+    posted_at = NULL,
+    in_transit_at = NULL,
+    at_destination_city_at = NULL,
+    out_for_delivery_at = NULL
+WHERE tracking_code <> ''`); err != nil {
+		return 0, fmt.Errorf("reset stage stamps: %w", err)
+	}
+
 	rows, err := b.Pool.Query(ctx, `
 SELECT id FROM shipments WHERE tracking_code <> '' ORDER BY id`)
 	if err != nil {

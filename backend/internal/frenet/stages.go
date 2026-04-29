@@ -13,7 +13,13 @@ import (
 // rastreiaki stage it represents (column name in shipments). Returns
 // empty string when the event doesn't map to a milestone.
 //
-// Order matters: more specific patterns first.
+// IMPORTANT: order is reverse-chronological (terminal stages first)
+// AND more-specific phrases must come before more-general ones. The
+// canonical Frenet first event is "Etiqueta emitida - Aguardando
+// postagem pelo remetente": it contains BOTH "etiqueta emitida" and
+// "aguardando postagem", so the etiqueta case has to match first or
+// it gets swallowed by the preparing_at case (and label_issued_at
+// stays NULL for the entire pipeline, breaking the funnel).
 func MapEventToStage(description string) string {
 	d := normalizeStage(description)
 
@@ -36,15 +42,17 @@ func MapEventToStage(description string) string {
 
 	case strings.Contains(d, "em transito"),
 		strings.Contains(d, "em transferencia"),
-		strings.Contains(d, "encaminhado"),
 		strings.Contains(d, "correcao de rota"),
 		strings.Contains(d, "em curso"):
 		return "in_transit_at"
 
 	case strings.Contains(d, "postado"),
-		strings.Contains(d, "objeto postado"),
 		strings.Contains(d, "postagem efetuada"):
 		return "posted_at"
+
+	case strings.Contains(d, "etiqueta emitida"),
+		strings.Contains(d, "etiqueta gerada"):
+		return "label_issued_at"
 
 	case strings.Contains(d, "pronto para coleta"),
 		strings.Contains(d, "aguardando coleta"),
@@ -56,9 +64,10 @@ func MapEventToStage(description string) string {
 		strings.Contains(d, "aguardando postagem"):
 		return "preparing_at"
 
-	case strings.Contains(d, "etiqueta emitida"),
-		strings.Contains(d, "etiqueta gerada"):
-		return "label_issued_at"
+	case strings.Contains(d, "encaminhado"):
+		// Generic "encaminhado" comes last so the more specific
+		// "encaminhado para entrega" wins above.
+		return "in_transit_at"
 	}
 	return ""
 }
