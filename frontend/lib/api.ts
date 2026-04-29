@@ -29,27 +29,34 @@ export interface OrdersQuery {
   offset?: number;
 }
 
-// Browser fetch goes through the public API hostname (CORS + Traefik).
-// Server-side fetch (RSC, route handlers) prefers the Docker-internal
-// hostname when set — faster, no public DNS dependency, no TLS round
-// trip — and falls back to the public URL otherwise.
+// Browser fetch always uses a relative URL — Next rewrites /api/* to the
+// internal backend, so the client never needs to know the hostname.
+// Server-side fetch (RSC) goes direct to the docker network for speed.
 function baseURL(): string {
   if (typeof window === "undefined") {
     return (
       process.env.INTERNAL_API_URL ??
       process.env.NEXT_PUBLIC_API_URL ??
-      "http://localhost:8080"
+      "http://backend:8080"
     );
   }
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+  return ""; // relative URL; Next rewrites /api/* → backend
 }
 
 function url(path: string, params?: Record<string, unknown>): string {
-  const u = new URL(path, baseURL());
+  const base = baseURL();
+  const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v === undefined || v === null || v === "") continue;
-    u.searchParams.set(k, String(v));
+    sp.set(k, String(v));
   }
+  const qs = sp.toString();
+  if (base === "") {
+    // Browser: relative URL
+    return qs ? `${path}?${qs}` : path;
+  }
+  const u = new URL(path, base);
+  for (const [k, v] of sp.entries()) u.searchParams.set(k, v);
   return u.toString();
 }
 
