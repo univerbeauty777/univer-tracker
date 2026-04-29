@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { SlaBadge } from "@/components/sla-badge";
@@ -156,9 +157,16 @@ function Th({
 }
 
 function Row({ order: o }: { order: OrderListItem }) {
-  const idleDays = o.tracking.last_event_at
-    ? Math.max(0, Math.floor((Date.now() - new Date(o.tracking.last_event_at).getTime()) / 86_400_000))
-    : null;
+  // idleDays is computed client-side only — Date.now() differs between
+  // SSR pass and client hydration, which trips React #418 around midnight
+  // boundaries. Server renders null (no badge), client mounts and fills.
+  const [idleDays, setIdleDays] = useState<number | null>(null);
+  useEffect(() => {
+    if (!o.tracking.last_event_at) return;
+    setIdleDays(
+      Math.max(0, Math.floor((Date.now() - new Date(o.tracking.last_event_at).getTime()) / 86_400_000)),
+    );
+  }, [o.tracking.last_event_at]);
   const customer = dedupeName(o.customer_name);
   return (
     <tr className="border-b border-border/40 transition-colors last:border-0 hover:bg-muted/40">
