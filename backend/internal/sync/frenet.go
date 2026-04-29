@@ -118,8 +118,9 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 			latestStatus = frenet.MapEvent(e.EventDescription)
 		}
 
-		// Per-stage timestamp: keep the earliest occurrence.
-		if stage := frenet.MapEventToStage(e.EventDescription); stage != "" {
+		// Per-stage timestamp: keep the earliest occurrence. A single
+		// event can hit multiple stages — see MapEventToStages docs.
+		for _, stage := range frenet.MapEventToStages(e.EventDescription) {
 			applyStageStamp(ship, stage, occ)
 		}
 	}

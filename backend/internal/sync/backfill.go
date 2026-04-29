@@ -99,12 +99,10 @@ ORDER BY occurred_at ASC`
 		if err := rows.Scan(&occ, &descr); err != nil {
 			continue
 		}
-		stage := frenet.MapEventToStage(descr)
-		if stage == "" {
-			continue
-		}
-		if applyIfEarlier(ship, stage, occ) {
-			changed = true
+		for _, stage := range frenet.MapEventToStages(descr) {
+			if applyIfEarlier(ship, stage, occ) {
+				changed = true
+			}
 		}
 	}
 

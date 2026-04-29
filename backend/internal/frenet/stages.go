@@ -9,20 +9,41 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// MapEventToStage classifies a Frenet event description into the
-// rastreiaki stage it represents (column name in shipments). Returns
-// empty string when the event doesn't map to a milestone.
+// MapEventToStages classifies a Frenet event description into one or
+// more rastreiaki stages it represents. Returns an empty slice when
+// the event doesn't map to any milestone.
 //
-// IMPORTANT: order is reverse-chronological (terminal stages first)
-// AND more-specific phrases must come before more-general ones. The
-// canonical Frenet first event is "Etiqueta emitida - Aguardando
-// postagem pelo remetente": it contains BOTH "etiqueta emitida" and
-// "aguardando postagem", so the etiqueta case has to match first or
-// it gets swallowed by the preparing_at case (and label_issued_at
-// stays NULL for the entire pipeline, breaking the funnel).
-func MapEventToStage(description string) string {
+// Multiple stages can apply because Frenet's first canonical event is
+// "Etiqueta emitida - Aguardando postagem pelo remetente": that single
+// event simultaneously means label_issued_at AND preparing_at — the
+// label was generated AND the seller is in the preparing window.
+// Returning both keeps the funnel honest (149 etiquetas emitidas → 149
+// em preparação) instead of forcing a single classification.
+func MapEventToStages(description string) []string {
 	d := normalizeStage(description)
 
+	// Combined first event: label issued + currently preparing.
+	if strings.Contains(d, "etiqueta emitida") && strings.Contains(d, "aguardando postagem") {
+		return []string{"label_issued_at", "preparing_at"}
+	}
+	if s := mapSingleStage(d); s != "" {
+		return []string{s}
+	}
+	return nil
+}
+
+// MapEventToStage is the back-compat single-result variant; first stage
+// wins. New code should prefer MapEventToStages so multi-stage events
+// don't drop the secondary classification.
+func MapEventToStage(description string) string {
+	stages := MapEventToStages(description)
+	if len(stages) == 0 {
+		return ""
+	}
+	return stages[0]
+}
+
+func mapSingleStage(d string) string {
 	switch {
 	case strings.Contains(d, "entregue"),
 		strings.Contains(d, "entrega efetuada"),
