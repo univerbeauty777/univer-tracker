@@ -9,16 +9,17 @@ import (
 
 // Order is a minimal projection of a WooCommerce order — only fields we care about.
 type Order struct {
-	ID            int64       `json:"id"`
-	Status        string      `json:"status"`
-	DateCreatedGMT TimeRFC3339 `json:"date_created_gmt"`
-	DatePaidGMT    TimeRFC3339 `json:"date_paid_gmt"`
-	Total          string      `json:"total"`
-	Billing        Address     `json:"billing"`
-	Shipping       Address     `json:"shipping"`
-	LineItems      []LineItem  `json:"line_items"`
-	ShippingLines  []Shipping  `json:"shipping_lines"`
-	MetaData       []Meta      `json:"meta_data"`
+	ID                int64       `json:"id"`
+	Status            string      `json:"status"`
+	DateCreatedGMT    TimeRFC3339 `json:"date_created_gmt"`
+	DatePaidGMT       TimeRFC3339 `json:"date_paid_gmt"`
+	DateCompletedGMT  TimeRFC3339 `json:"date_completed_gmt"`
+	Total             string      `json:"total"`
+	Billing           Address     `json:"billing"`
+	Shipping          Address     `json:"shipping"`
+	LineItems         []LineItem  `json:"line_items"`
+	ShippingLines     []Shipping  `json:"shipping_lines"`
+	MetaData          []Meta      `json:"meta_data"`
 }
 
 type Address struct {

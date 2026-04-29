@@ -77,7 +77,10 @@ func ComputeBreakdown(ship *store.Shipment, now time.Time) BreakdownResult {
 
 		if d.Stamp != nil && !d.Stamp.IsZero() {
 			t := *d.Stamp
-			actual := t.Sub(anchor).Hours()
+			// Clamp to >=0: stamps slightly before the anchor (e.g. WC order
+			// created retroactively, clock skew) would render "—" via the
+			// frontend's fmtHours, which negates the "Concluído em" label.
+			actual := math.Max(0, t.Sub(anchor).Hours())
 			row.ActualHours = ptrF(actual)
 			row.DelayHours = math.Max(0, actual-float64(d.CumHours))
 			row.IsOnTime = actual <= float64(d.CumHours)

@@ -117,7 +117,21 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 		Health:       "unknown",
 		CreatedAt:    now,
 	}
+	// If WC already says the order is completed/delivered, mirror that
+	// into the shipment so KPIs (avg delivery, OTD) work without waiting
+	// for Frenet to backfill the 'Entregue' event.
+	if w.Status == "completed" || w.Status == "entregue" {
+		t := w.DateCompletedGMT.Time
+		if t.IsZero() {
+			t = now
+		}
+		ship.DeliveredAt = &t
+		ship.Status = "delivered"
+	}
 	sla.Apply(ship, sla.Compute(ship, now))
+	eval := sla.Evaluate(ship, ship.CreatedAt, now)
+	ship.SLAState = string(eval.State)
+	ship.SLABreachedStage = eval.BreachedStage
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
 	}
@@ -200,9 +214,11 @@ func inferTags(w *woocommerce.Order, total float64, method string) []string {
 func inferCarrierFromMethod(title string) string {
 	t := strings.ToLower(title)
 	switch {
-	case strings.Contains(t, "sedex"):
+	case strings.Contains(t, "sedex"), strings.Contains(t, "expresso"), strings.Contains(t, "expressa"):
 		return "Correios - SEDEX"
-	case strings.Contains(t, "pac"):
+	case strings.Contains(t, "pac"),
+		strings.Contains(t, "frete grátis"), strings.Contains(t, "frete gratis"),
+		strings.Contains(t, "econ"): // Econômico
 		return "Correios - PAC"
 	case strings.Contains(t, "correios"):
 		return "Correios"
@@ -220,8 +236,13 @@ func inferCarrierFromMethod(title string) string {
 		return "DHL"
 	case strings.Contains(t, "fedex"):
 		return "FedEx"
+	case strings.Contains(t, "motoboy"):
+		return "Motoboy"
 	}
-	return strings.TrimSpace(title)
+	// Unknown method title — fall back to "Correios - PAC" rather than
+	// polluting the dashboard with shipping_method labels masquerading
+	// as carriers ("Frete grátis", "Expresso (5 dias)" etc).
+	return "Correios - PAC"
 }
 
 // buildName joins first + last name, skipping the second part when the

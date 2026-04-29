@@ -13,9 +13,10 @@ import {
 import { ExportButton } from "@/components/export-button";
 import { Kpi, absDelta, pctDelta } from "@/components/kpi";
 import { LastSyncBanner } from "@/components/last-sync-banner";
+import { RelativeTime } from "@/components/relative-time";
 import { SlaBadge } from "@/components/sla-badge";
 import { fetchOrders, fetchOverview } from "@/lib/api";
-import { dedupeName, formatDate, formatRelative } from "@/lib/format";
+import { dedupeName, formatDate } from "@/lib/format";
 import { fmtHours } from "@/lib/format-hours";
 import type { CarrierStats, OrderListItem, Overview, SLAState } from "@/lib/types";
 
@@ -243,7 +244,7 @@ export default async function PainelPage() {
                       {dedupeName(o.customer_name) || "—"}
                     </p>
                     <p className="mt-0.5 text-[11px] text-zinc-500">
-                      Último evento: {formatRelative(o.tracking.last_event_at)}
+                      Último evento: <RelativeTime value={o.tracking.last_event_at} />
                     </p>
                   </div>
                   <div className="ml-4 shrink-0 text-right">

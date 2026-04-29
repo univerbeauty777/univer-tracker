@@ -6,7 +6,8 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { SlaBadge } from "@/components/sla-badge";
 import { TagList } from "@/components/tag-chip";
-import { dedupeName, formatBRL, formatDate, formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
+import { dedupeName, formatBRL, formatDate } from "@/lib/format";
 import type { OrderListItem, SLAState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -159,8 +160,8 @@ function Row({ order: o }: { order: OrderListItem }) {
         <Link href={`/pedidos/${o.id}`} className="font-mono text-xs font-medium hover:underline">
           #{o.id}
         </Link>
-        <div className="mt-0.5 text-[11px] text-muted-foreground" title={formatDate(o.created_at)}>
-          {formatRelative(o.created_at)}
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <RelativeTime value={o.created_at} />
         </div>
       </td>
       <td className="px-4 py-3">
@@ -190,8 +191,8 @@ function Row({ order: o }: { order: OrderListItem }) {
         {o.tracking.last_event ? (
           <div>
             <div className="line-clamp-1 max-w-[280px] text-xs">{o.tracking.last_event}</div>
-            <div className="text-[11px] text-muted-foreground" title={formatDate(o.tracking.last_event_at)}>
-              {formatRelative(o.tracking.last_event_at)}
+            <div className="text-[11px] text-muted-foreground">
+              <RelativeTime value={o.tracking.last_event_at} />
               {idleDays !== null && idleDays >= 4 ? (
                 <span className="ml-1 text-warning">· {idleDays}d sem evento</span>
               ) : null}
