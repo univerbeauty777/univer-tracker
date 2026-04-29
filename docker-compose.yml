@@ -148,6 +148,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${SERVICE_URL_BACKEND_8080:-http://localhost:8080}
+        INTERNAL_API_URL: http://backend:8080
     restart: unless-stopped
     depends_on:
       - backend

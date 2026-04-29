@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 
+// Resolved at build time. The standalone bundle bakes whatever env is
+// present when next build runs — for the production image (built inside
+// the compose stack) we pass INTERNAL_API_URL=http://backend:8080 as a
+// build arg, so that's what ends up in the output. Local dev falls back
+// to localhost.
 const internalAPI =
   process.env.INTERNAL_API_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
-  "http://backend:8080";
+  "http://localhost:8080";
 
 const nextConfig: NextConfig = {
   output: "standalone",
