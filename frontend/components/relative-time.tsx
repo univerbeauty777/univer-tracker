@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatDate, formatDateTime, formatRelative } from "@/lib/format";
+import { formatDateTime, formatRelative } from "@/lib/format";
 
 /**
- * Server renders the absolute date (deterministic, no Date.now()), client
- * upgrades to a relative timestamp on hydration. This avoids the React
- * #418 hydration mismatch caused by clock drift between SSR and the
- * browser tick.
+ * Renders nothing on the server (just an empty <time> element) and
+ * fills in the relative timestamp client-side after mount. Anything
+ * computed via Intl on the server can drift from Chrome's Intl
+ * (full-icu builds vs Chrome ICU snapshot, NBSP differences, etc),
+ * which trips React #418. By keeping SSR deterministic-empty we
+ * eliminate the mismatch by construction.
  */
 export function RelativeTime({
   value,
@@ -16,12 +18,14 @@ export function RelativeTime({
   value?: string | null;
   fallback?: string;
 }) {
-  const seed = fallback ?? formatDate(value);
-  const [text, setText] = useState(seed);
+  const [text, setText] = useState<string>(fallback ?? "");
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setText(formatRelative(value));
-    const id = setInterval(() => setText(formatRelative(value)), 60_000);
+    setMounted(true);
+    const tick = () => setText(formatRelative(value));
+    tick();
+    const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
   }, [value]);
 
@@ -31,7 +35,7 @@ export function RelativeTime({
       title={value ? formatDateTime(value) : undefined}
       suppressHydrationWarning
     >
-      {text}
+      {mounted ? text : (fallback ?? "\u00A0")}
     </time>
   );
 }

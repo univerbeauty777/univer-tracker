@@ -8,6 +8,12 @@ export function formatBRL(value: string | number | null | undefined): string {
   });
 }
 
+// Anchor every date format to São Paulo so SSR (Docker UTC) and the
+// browser (typically America/Sao_Paulo) agree exactly — a timestamp
+// near midnight UTC was rendering "30 abr" on the server and "29 abr"
+// on the client, tripping React #418.
+const BR_TZ = "America/Sao_Paulo";
+
 export function formatDate(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -16,6 +22,7 @@ export function formatDate(iso?: string | null): string {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: BR_TZ,
   });
 }
 
@@ -32,6 +39,7 @@ export function formatDateTime(value?: string | null): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: BR_TZ,
   });
 }
 
