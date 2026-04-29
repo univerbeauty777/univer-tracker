@@ -41,18 +41,28 @@ export function LastSyncBanner() {
     setError(null);
     start(async () => {
       try {
+        // Snapshot timestamps to detect when the worker finishes; a
+        // hard-coded 4s pause was racing the WC pull on big catalogues.
+        const before = sources?.map((s) => s.last_synced_at).join("|") ?? "";
         await triggerSync();
-        // Optimistic: refresh after a short pause so the worker has a
-        // chance to write a fresh last_synced_at.
-        setTimeout(async () => {
+        let attempt = 0;
+        while (attempt < 12) {
+          await new Promise((r) => setTimeout(r, 2500));
           try {
             const s = await fetchSyncStatus();
+            const after = s.sources.map((x) => x.last_synced_at).join("|");
+            if (after !== before) {
+              setSources(s.sources);
+              router.refresh();
+              return;
+            }
+            // Keep showing fresh state even mid-poll.
             setSources(s.sources);
-            router.refresh();
           } catch {
-            /* ignore */
+            /* keep polling */
           }
-        }, 4000);
+          attempt++;
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "erro ao sincronizar");
       }
