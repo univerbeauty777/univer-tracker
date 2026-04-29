@@ -59,6 +59,10 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	}
 	mux.HandleFunc("GET /api/v1/analytics/overview", analytics.Overview)
 
+	gargalos := &handler.Gargalos{Repo: &store.Transitions{Pool: pool}, Log: log}
+	mux.HandleFunc("GET /api/v1/analytics/funnel", gargalos.Funnel)
+	mux.HandleFunc("GET /api/v1/analytics/transitions", gargalos.Transitions)
+
 	stateRepo := &store.SyncStates{Pool: pool}
 	wcSync := &syncpkg.WooCommerce{
 		Store:        &store.Orders{Pool: pool},

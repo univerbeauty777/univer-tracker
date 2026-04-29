@@ -92,7 +92,8 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 		ship.Service = resp.ServiceDescription
 	}
 
-	// Translate Frenet events → DB rows and capture latest description.
+	// Translate Frenet events → DB rows, populate per-stage timestamps,
+	// and capture latest description for the badge.
 	dbEvents := make([]store.Event, 0, len(resp.TrackingEvents))
 	var newest time.Time
 	var latestDescr string
@@ -116,6 +117,11 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 			latestDescr = e.EventDescription
 			latestStatus = frenet.MapEvent(e.EventDescription)
 		}
+
+		// Per-stage timestamp: keep the earliest occurrence.
+		if stage := frenet.MapEventToStage(e.EventDescription); stage != "" {
+			applyStageStamp(ship, stage, occ)
+		}
 	}
 
 	if len(dbEvents) > 0 {
@@ -130,18 +136,56 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 	}
 	if latestStatus != frenet.StatusUnknown {
 		ship.Status = string(latestStatus)
-		if latestStatus == frenet.StatusDelivered && ship.DeliveredAt == nil {
-			t := newest
-			ship.DeliveredAt = &t
-		}
 	}
 
-	sla.Apply(ship, sla.Compute(ship, time.Now().UTC()))
+	anchor := ship.CreatedAt
+	if anchor.IsZero() {
+		anchor = now
+	}
+	eval := sla.Evaluate(ship, anchor, now)
+	ship.SLAState = string(eval.State)
+	ship.SLABreachedStage = eval.BreachedStage
+	if ship.EstimatedDelivery == nil {
+		t := eval.EstimatedAt
+		ship.EstimatedDelivery = &t
+	}
+	sla.Apply(ship, sla.Compute(ship, now))
 
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
 	}
 	return nil
+}
+
+// applyStageStamp keeps the earliest known timestamp for a stage. Frenet
+// sometimes emits the same milestone twice (initial scan + retry), so we
+// always trust the first one.
+func applyStageStamp(ship *store.Shipment, stage string, t time.Time) {
+	earlier := func(cur *time.Time, next time.Time) *time.Time {
+		if cur == nil || cur.IsZero() || next.Before(*cur) {
+			tt := next
+			return &tt
+		}
+		return cur
+	}
+	switch stage {
+	case "label_issued_at":
+		ship.LabelIssuedAt = earlier(ship.LabelIssuedAt, t)
+	case "preparing_at":
+		ship.PreparingAt = earlier(ship.PreparingAt, t)
+	case "ready_for_pickup_at":
+		ship.ReadyForPickupAt = earlier(ship.ReadyForPickupAt, t)
+	case "posted_at":
+		ship.PostedAt = earlier(ship.PostedAt, t)
+	case "in_transit_at":
+		ship.InTransitAt = earlier(ship.InTransitAt, t)
+	case "at_destination_city_at":
+		ship.AtDestinationCityAt = earlier(ship.AtDestinationCityAt, t)
+	case "out_for_delivery_at":
+		ship.OutForDeliveryAt = earlier(ship.OutForDeliveryAt, t)
+	case "delivered_at":
+		ship.DeliveredAt = earlier(ship.DeliveredAt, t)
+	}
 }
 
 // cleanLocation strips the "-UF-BR" / "-BR" prefixes Frenet emits when

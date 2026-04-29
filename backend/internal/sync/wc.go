@@ -144,6 +144,8 @@ func mapOrder(w *woocommerce.Order, storeID int64) *store.Order {
 
 	total, _ := strconv.ParseFloat(w.Total, 64)
 
+	tags := inferTags(w, total, method)
+
 	o := &store.Order{
 		StoreID:        storeID,
 		WCOrderID:      w.ID,
@@ -155,6 +157,8 @@ func mapOrder(w *woocommerce.Order, storeID int64) *store.Order {
 		CustomerUF:     uf,
 		ShippingMethod: method,
 		TotalBRL:       total,
+		DeclaredValue:  total, // best proxy until WC exposes a separate insurance value
+		Tags:           tags,
 		CreatedAt:      w.DateCreatedGMT.Time,
 	}
 	if !w.DatePaidGMT.Time.IsZero() {
@@ -165,6 +169,28 @@ func mapOrder(w *woocommerce.Order, storeID int64) *store.Order {
 		o.CreatedAt = time.Now().UTC()
 	}
 	return o
+}
+
+// inferTags derives the operational tags rastreiaki shows on each order.
+// Today these come from heuristics on the WC payload; future iterations
+// can let ops mark tags by hand.
+func inferTags(w *woocommerce.Order, total float64, method string) []string {
+	tags := []string{}
+	method = strings.ToLower(method)
+
+	if total >= 500 {
+		tags = append(tags, "alto_valor")
+	}
+	if strings.Contains(method, "express") || strings.Contains(method, "sedex") || strings.Contains(method, "motoboy") {
+		tags = append(tags, "urgente")
+	}
+	if strings.Contains(method, "frete grátis") || strings.Contains(method, "frete gratis") {
+		tags = append(tags, "frete_gratis")
+	}
+	if w.Status == "on-hold" || w.Status == "retornado" {
+		tags = append(tags, "reentrega")
+	}
+	return tags
 }
 
 // inferCarrierFromMethod parses a WooCommerce shipping_method title into a
