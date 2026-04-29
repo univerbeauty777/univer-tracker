@@ -19,10 +19,13 @@ const nextConfig: NextConfig = {
    * CORS, and makes local dev / staging / prod behave identically.
    */
   async rewrites() {
+    // Reverse-proxy only the backend's /api/v1/* surface — keep /api/health
+    // (Next route handler) local so the Docker healthcheck doesn't depend
+    // on the backend being up.
     return [
       {
-        source: "/api/:path*",
-        destination: `${internalAPI}/api/:path*`,
+        source: "/api/v1/:path*",
+        destination: `${internalAPI}/api/v1/:path*`,
       },
     ];
   },
