@@ -27,11 +27,11 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Univer Tracker",
-    template: "%s · Univer Tracker",
+    default: "rastreiaki — SLA logístico em tempo real",
+    template: "%s · rastreiaki",
   },
   description:
-    "Sistema de logística inteligente — rastreamento, automação e insights em tempo real.",
+    "Rastreamento com SLA por etapa, gargalos da operação visíveis e alertas automáticos quando o prazo aperta.",
   metadataBase: new URL("https://tracker.lizzon.com.br"),
 };
 
@@ -42,7 +42,7 @@ export default function RootLayout({
     <html
       lang="pt-BR"
       suppressHydrationWarning
-      className={`${sans.variable} ${display.variable} ${mono.variable}`}
+      className={`dark ${sans.variable} ${display.variable} ${mono.variable}`}
     >
       <body className="font-sans">
         <ThemeProvider

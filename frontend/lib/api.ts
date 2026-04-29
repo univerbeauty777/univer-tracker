@@ -1,6 +1,7 @@
 import type {
   Facets,
   FrenetIntegration,
+  FunnelResponse,
   IntegrationsResponse,
   OrderDetail,
   OrderHistoryResponse,
@@ -8,6 +9,7 @@ import type {
   OverviewResponse,
   SyncStatusResponse,
   TestResult,
+  TransitionsResponse,
   WAHAIntegration,
   WooCommerceIntegration,
 } from "./types";
@@ -94,6 +96,18 @@ export async function notifyOrder(
 
 export function ordersExportURL(params: Record<string, string | undefined>): string {
   return url("/api/v1/orders/export.csv", params);
+}
+
+export async function fetchFunnel(days = 30): Promise<FunnelResponse> {
+  const res = await fetch(url("/api/v1/analytics/funnel", { days }), { cache: "no-store" });
+  if (!res.ok) throw new Error(`funnel ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTransitions(days = 30): Promise<TransitionsResponse> {
+  const res = await fetch(url("/api/v1/analytics/transitions", { days }), { cache: "no-store" });
+  if (!res.ok) throw new Error(`transitions ${res.status}`);
+  return res.json();
 }
 
 export async function fetchOverview(): Promise<OverviewResponse> {

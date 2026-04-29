@@ -28,6 +28,8 @@ export interface TimelineEvent {
   type?: string;
 }
 
+export type SLAState = "ON_TRACK" | "AT_RISK" | "BREACHED" | "COMPLETED" | "COMPLETED_LATE";
+
 export interface TrackingView {
   number: string;
   carrier: string;
@@ -38,10 +40,19 @@ export interface TrackingView {
   status_label: string;
   health: Health;
   health_label: string;
+  sla_state?: SLAState;
+  sla_breached_stage?: string;
   last_event?: string;
   last_event_at?: string;
   estimated_delivery?: string;
   delivered_at?: string;
+  label_issued_at?: string;
+  preparing_at?: string;
+  ready_for_pickup_at?: string;
+  posted_at?: string;
+  in_transit_at?: string;
+  at_destination_city_at?: string;
+  out_for_delivery_at?: string;
   idle_since?: string;
   risk_score: number;
   events?: TimelineEvent[];
@@ -73,6 +84,8 @@ export interface OrderListItem {
   customer_city: string;
   customer_state: string;
   total: number;
+  declared_value?: number;
+  tags?: string[];
   created_at: string;
   paid_at?: string;
   tracking: TrackingView;
@@ -210,4 +223,35 @@ export interface OrderNotification {
 export interface OrderHistoryResponse {
   changes: StatusChange[];
   notifications: OrderNotification[];
+}
+
+export interface FunnelStage {
+  field: string;
+  label: string;
+  count: number;
+}
+
+export interface CarrierBucket {
+  count: number;
+  avg_hours: number;
+  breach_rate: number;
+}
+
+export interface Transition {
+  field: string;
+  label: string;
+  count: number;
+  avg_hours: number;
+  p50_hours: number;
+  p90_hours: number;
+  breach_rate: number;
+  by_carrier: Record<string, CarrierBucket>;
+}
+
+export interface FunnelResponse {
+  stages: FunnelStage[];
+}
+
+export interface TransitionsResponse {
+  transitions: Transition[];
 }

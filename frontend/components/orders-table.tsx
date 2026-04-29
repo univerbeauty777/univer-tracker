@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
-import { HealthBadge } from "@/components/health-badge";
+import { SlaBadge } from "@/components/sla-badge";
+import { TagList } from "@/components/tag-chip";
 import { dedupeName, formatBRL, formatDate, formatRelative } from "@/lib/format";
-import type { Health, OrderListItem } from "@/lib/types";
+import type { OrderListItem, SLAState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type SortKey = "created_at" | "total" | "customer_name" | "last_event";
@@ -88,6 +89,7 @@ export function OrdersTable({
               <Th label="Cliente" sortKey="customer_name" sort={sort} dir={dir} onSort={setSort} />
               <th className="px-4 py-3 text-left font-medium">SLA</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
+              <th className="px-4 py-3 text-left font-medium">Tags</th>
               <Th label="Último evento" sortKey="last_event" sort={sort} dir={dir} onSort={setSort} />
               <Th label="Total" sortKey="total" sort={sort} dir={dir} onSort={setSort} align="right" />
               <th className="w-10" />
@@ -96,7 +98,7 @@ export function OrdersTable({
           <tbody>
             {orders.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-16 text-center text-sm text-muted-foreground">
+                <td colSpan={8} className="px-6 py-16 text-center text-sm text-muted-foreground">
                   Nenhum pedido bate com esses filtros.
                 </td>
               </tr>
@@ -168,7 +170,7 @@ function Row({ order: o }: { order: OrderListItem }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <HealthBadge health={o.tracking.health as Health} label={o.tracking.health_label} />
+        <SlaBadge state={o.tracking.sla_state as SLAState | undefined} />
         {o.tracking.estimated_delivery ? (
           <div className="mt-1 text-[11px] text-muted-foreground">
             ETA · {formatDate(o.tracking.estimated_delivery)}
@@ -180,6 +182,9 @@ function Row({ order: o }: { order: OrderListItem }) {
         {o.tracking.status !== "unknown" ? (
           <div className="mt-0.5 text-[11px] text-muted-foreground">{o.tracking.status_label}</div>
         ) : null}
+      </td>
+      <td className="px-4 py-3">
+        <TagList tags={o.tags} />
       </td>
       <td className="px-4 py-3">
         {o.tracking.last_event ? (
