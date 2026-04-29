@@ -135,7 +135,11 @@ export interface Overview {
   on_time_rate: number;
   at_risk: number;
   breached: number;
+  in_progress: number;
   avg_delivery_days: number;
+  avg_preparing_hours: number;
+  avg_in_transit_hours: number;
+  avg_last_mile_hours: number;
   idle_alarms: number;
   previous_period?: PreviousPeriod;
 }
@@ -254,4 +258,34 @@ export interface FunnelResponse {
 
 export interface TransitionsResponse {
   transitions: Transition[];
+}
+
+export interface StageBreakdown {
+  field: string;
+  label: string;
+  target_hours: number;
+  actual_hours?: number;
+  delay_hours: number;
+  hours_to_target?: number;
+  completed_at?: string;
+  target_at: string;
+  is_on_time: boolean;
+  is_pending: boolean;
+  cascade_contribution: number;
+}
+
+export interface BreakdownDiagnosis {
+  first_delay_field?: string;
+  first_delay_label?: string;
+  first_delay_hours: number;
+  worst_delay_field?: string;
+  worst_delay_label?: string;
+  worst_delay_hours: number;
+  total_cascade_delay: number;
+}
+
+export interface BreakdownResponse {
+  anchor: string;
+  stages: StageBreakdown[];
+  diagnosis: BreakdownDiagnosis;
 }

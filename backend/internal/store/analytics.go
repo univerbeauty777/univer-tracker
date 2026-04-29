@@ -20,8 +20,14 @@ type Overview struct {
 	OnTimeRate      float64 `json:"on_time_rate"`
 	AtRisk          int     `json:"at_risk"`
 	Breached        int     `json:"breached"`
+	InProgress      int     `json:"in_progress"`
 	AvgDeliveryDays float64 `json:"avg_delivery_days"`
 	IdleAlarms      int     `json:"idle_alarms"`
+
+	// Per-phase averages in hours (rastreiaki painel).
+	AvgPreparingHours float64 `json:"avg_preparing_hours"`
+	AvgInTransitHours float64 `json:"avg_in_transit_hours"`
+	AvgLastMileHours  float64 `json:"avg_last_mile_hours"`
 
 	// PreviousPeriod is the same KPI block for the prior 30-day window
 	// so the dashboard can render up/down deltas.
@@ -57,13 +63,13 @@ SELECT
     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')                                          AS total_30d,
     COUNT(*) FILTER (WHERE delivered_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days')           AS delivered_30d,
     COUNT(*) FILTER (
-        WHERE delivered_at IS NOT NULL
+        WHERE sla_state = 'COMPLETED'
+          AND delivered_at IS NOT NULL
           AND delivered_at >= NOW() - INTERVAL '30 days'
-          AND estimated_delivery IS NOT NULL
-          AND delivered_at::date <= estimated_delivery
     )                                                                                                          AS on_time_30d,
-    COUNT(*) FILTER (WHERE health = 'at_risk')                                                                 AS at_risk,
-    COUNT(*) FILTER (WHERE health = 'breached')                                                                AS breached,
+    COUNT(*) FILTER (WHERE sla_state = 'AT_RISK' AND delivered_at IS NULL)                                     AS at_risk,
+    COUNT(*) FILTER (WHERE sla_state IN ('BREACHED', 'COMPLETED_LATE'))                                        AS breached,
+    COUNT(*) FILTER (WHERE delivered_at IS NULL)                                                               AS in_progress,
     COALESCE(
         AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400.0)
         FILTER (WHERE delivered_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
@@ -74,15 +80,31 @@ SELECT
           AND idle_since < NOW() - INTERVAL '4 days'
           AND delivered_at IS NULL
           AND last_event_at IS NOT NULL
-    )                                                                                                          AS idle_alarms
+    )                                                                                                          AS idle_alarms,
+    COALESCE(
+        AVG(EXTRACT(EPOCH FROM (ready_for_pickup_at - created_at)) / 3600.0)
+        FILTER (WHERE ready_for_pickup_at IS NOT NULL AND created_at >= NOW() - INTERVAL '30 days'),
+        0
+    )                                                                                                          AS avg_preparing_hours,
+    COALESCE(
+        AVG(EXTRACT(EPOCH FROM (delivered_at - posted_at)) / 3600.0)
+        FILTER (WHERE delivered_at IS NOT NULL AND posted_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
+        0
+    )                                                                                                          AS avg_in_transit_hours,
+    COALESCE(
+        AVG(EXTRACT(EPOCH FROM (delivered_at - out_for_delivery_at)) / 3600.0)
+        FILTER (WHERE delivered_at IS NOT NULL AND out_for_delivery_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
+        0
+    )                                                                                                          AS avg_last_mile_hours
 FROM shipments
 WHERE tracking_code <> ''`
 
 	var o Overview
 	err := a.Pool.QueryRow(ctx, q).Scan(
 		&o.Total30d, &o.Delivered30d, &o.OnTime30d,
-		&o.AtRisk, &o.Breached,
+		&o.AtRisk, &o.Breached, &o.InProgress,
 		&o.AvgDeliveryDays, &o.IdleAlarms,
+		&o.AvgPreparingHours, &o.AvgInTransitHours, &o.AvgLastMileHours,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("overview: %w", err)

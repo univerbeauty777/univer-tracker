@@ -1,4 +1,5 @@
 import type {
+  BreakdownResponse,
   Facets,
   FrenetIntegration,
   FunnelResponse,
@@ -107,6 +108,12 @@ export async function fetchFunnel(days = 30): Promise<FunnelResponse> {
 export async function fetchTransitions(days = 30): Promise<TransitionsResponse> {
   const res = await fetch(url("/api/v1/analytics/transitions", { days }), { cache: "no-store" });
   if (!res.ok) throw new Error(`transitions ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBreakdown(orderId: number): Promise<BreakdownResponse> {
+  const res = await fetch(url(`/api/v1/orders/${orderId}/breakdown`), { cache: "no-store" });
+  if (!res.ok) throw new Error(`breakdown ${res.status}`);
   return res.json();
 }
 

@@ -296,6 +296,35 @@ func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": wcID, "status": body.Status})
 }
 
+// Breakdown handles GET /api/v1/orders/{id}/breakdown — per-stage SLA
+// analysis with diagnosis (first delay, worst delay, cascade contribution).
+func (h *Orders) Breakdown(w http.ResponseWriter, r *http.Request) {
+	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	dbOrder, err := h.Orders.GetByWCID(ctx, h.StoreID, wcID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load order")
+		return
+	}
+	ships, _ := h.Shipments.ListByOrder(ctx, dbOrder.ID)
+	if len(ships) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"stages": []any{}, "diagnosis": map[string]any{}})
+		return
+	}
+	res := orders.ComputeBreakdown(&ships[0], time.Now().UTC())
+	writeJSON(w, http.StatusOK, res)
+}
+
 // History handles GET /api/v1/orders/{id}/history (status audit log).
 func (h *Orders) History(w http.ResponseWriter, r *http.Request) {
 	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

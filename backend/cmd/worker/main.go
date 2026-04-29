@@ -79,6 +79,21 @@ func run() error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
+	// One-shot: replay tracking_events into stage timestamps so existing
+	// shipments inherit per-etapa data without waiting for the next
+	// Frenet event.
+	go func() {
+		bf := &sync.BackfillStages{Pool: pool, Shipments: shipmentsRepo, Log: log}
+		bctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		n, err := bf.Run(bctx)
+		if err != nil {
+			log.Error("backfill stages failed", "err", err)
+			return
+		}
+		log.Info("backfill stages done", "shipments_updated", n)
+	}()
+
 	// Run an initial pass right away so the first deploy has data fast.
 	go runWC(ctx, log, wcSync)
 	go runFrenet(ctx, log, frenetSync)

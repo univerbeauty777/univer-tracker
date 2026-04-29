@@ -12,9 +12,20 @@ import { CopyButton } from "@/components/copy-button";
 import { NotifyAction } from "@/components/notify-action";
 import { OrderHistory } from "@/components/order-history";
 import { RiskRing } from "@/components/risk-ring";
-import { fetchOrder } from "@/lib/api";
+import { CascadeBreakdown, DelayBreakdown } from "@/components/delay-breakdown";
+import { DelayDiagnosis } from "@/components/delay-diagnosis";
+import { SlaBadge } from "@/components/sla-badge";
+import { TagList } from "@/components/tag-chip";
+import { fetchBreakdown, fetchOrder } from "@/lib/api";
 import { dedupeName, formatBRL, formatDate, formatDateTime } from "@/lib/format";
-import type { Health, ShipmentStatus } from "@/lib/types";
+import type {
+  BreakdownResponse,
+  Health,
+  OrderDetail,
+  SLAState,
+  ShipmentStatus,
+  TimelineEvent,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +38,13 @@ export default async function OrderDetailPage({
   const orderId = Number(id);
   if (!Number.isFinite(orderId)) notFound();
 
-  let order;
+  let order: OrderDetail;
+  let breakdown: BreakdownResponse | null = null;
   try {
-    order = await fetchOrder(orderId);
+    [order, breakdown] = await Promise.all([
+      fetchOrder(orderId),
+      fetchBreakdown(orderId).catch(() => null),
+    ]);
   } catch {
     notFound();
   }
@@ -58,6 +73,7 @@ export default async function OrderDetailPage({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={order.status} label={order.status_label} />
+            <SlaBadge state={order.tracking.sla_state as SLAState | undefined} />
             <HealthBadge
               health={order.tracking.health as Health}
               label={order.tracking.health_label}
@@ -80,8 +96,45 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
+      {breakdown ? (
+        <DelayDiagnosis
+          diagnosis={breakdown.diagnosis}
+          slaState={order.tracking.sla_state as SLAState | undefined}
+          expectedAt={order.tracking.estimated_delivery}
+          status={order.status_label}
+        />
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          {breakdown && breakdown.stages.length > 0 ? (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-base">Análise por etapa</CardTitle>
+                <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2 rounded bg-emerald-500" /> no prazo
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2 rounded bg-rose-500" /> atrasado
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2 rounded bg-zinc-700" /> pendente
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <DelayBreakdown stages={breakdown.stages} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {breakdown && breakdown.diagnosis.total_cascade_delay > 0 ? (
+            <CascadeBreakdown
+              stages={breakdown.stages}
+              total={breakdown.diagnosis.total_cascade_delay}
+            />
+          ) : null}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -235,6 +288,19 @@ export default async function OrderDetailPage({
         </div>
 
         <div className="space-y-6">
+          {order.tags && order.tags.length > 0 ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  Tags
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TagList tags={order.tags} max={10} />
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>Cliente</CardTitle>

@@ -1,8 +1,11 @@
 import Link from "next/link";
 import {
+  Activity,
   AlertTriangle,
   Clock,
+  Hourglass,
   Package,
+  PackageCheck,
   Timer,
   TrendingUp,
   Truck,
@@ -13,6 +16,7 @@ import { LastSyncBanner } from "@/components/last-sync-banner";
 import { SlaBadge } from "@/components/sla-badge";
 import { fetchOrders, fetchOverview } from "@/lib/api";
 import { dedupeName, formatDate, formatRelative } from "@/lib/format";
+import { fmtHours } from "@/lib/format-hours";
 import type { CarrierStats, OrderListItem, Overview, SLAState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +40,8 @@ export default async function PainelPage() {
   }
 
   const prev = overview?.previous_period;
+  const fmtPhase = (h?: number) =>
+    h && Number.isFinite(h) && h > 0 ? fmtHours(h) : "—";
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
@@ -60,29 +66,18 @@ export default async function PainelPage() {
           delta={prev ? pctDelta(overview?.total_30d ?? 0, prev.total_30d) : null}
         />
         <Kpi
+          label="Em andamento"
+          value={overview?.in_progress ?? 0}
+          hint="no pipeline ativo"
+          icon={Activity}
+        />
+        <Kpi
           label="Taxa OTD"
           value={`${Math.round((overview?.on_time_rate ?? 0) * 100)}%`}
           hint="entregas no prazo"
           icon={TrendingUp}
           tone="success"
           delta={prev ? absDelta(overview?.on_time_rate ?? 0, prev.on_time_rate) : null}
-        />
-        <Kpi
-          label="Lead time médio"
-          value={
-            overview && overview.avg_delivery_days > 0
-              ? `${overview.avg_delivery_days.toFixed(1)}d`
-              : "—"
-          }
-          hint="pedido → entrega"
-          icon={Timer}
-          tone="info"
-          delta={
-            prev && overview && overview.avg_delivery_days > 0 && prev.avg_delivery_days > 0
-              ? pctDelta(overview.avg_delivery_days, prev.avg_delivery_days)
-              : null
-          }
-          positiveIsGood={false}
         />
         <Kpi
           label="Em risco"
@@ -99,6 +94,47 @@ export default async function PainelPage() {
           icon={AlertTriangle}
           tone="destructive"
           positiveIsGood={false}
+        />
+        <Kpi
+          label="Lead time médio"
+          value={
+            overview && overview.avg_delivery_days > 0
+              ? `${overview.avg_delivery_days.toFixed(1)}d`
+              : "—"
+          }
+          hint="pedido → entrega"
+          icon={Timer}
+          delta={
+            prev && overview && overview.avg_delivery_days > 0 && prev.avg_delivery_days > 0
+              ? pctDelta(overview.avg_delivery_days, prev.avg_delivery_days)
+              : null
+          }
+          positiveIsGood={false}
+        />
+      </section>
+
+      {/* KPIs por fase */}
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Kpi
+          label="Preparação"
+          value={fmtPhase(overview?.avg_preparing_hours)}
+          hint="pedido → pronto p/ coleta"
+          icon={Hourglass}
+          tone="info"
+        />
+        <Kpi
+          label="Trânsito"
+          value={fmtPhase(overview?.avg_in_transit_hours)}
+          hint="postagem → entrega"
+          icon={Truck}
+          tone="info"
+        />
+        <Kpi
+          label="Last mile"
+          value={fmtPhase(overview?.avg_last_mile_hours)}
+          hint="saiu p/ entrega → entregue"
+          icon={PackageCheck}
+          tone="info"
         />
         <Kpi
           label="Sem evento >4d"
