@@ -94,6 +94,21 @@ func run() error {
 		log.Info("backfill stages done", "shipments_updated", n)
 	}()
 
+	// One-shot: normalise legacy carrier values that hold shipping_method
+	// titles ("Frete grátis", "Expresso") so the dashboard groups them
+	// under the actual carrier (Correios - PAC / SEDEX, Jadlog, …).
+	go func() {
+		cb := &sync.BackfillCarriers{Pool: pool, Log: log}
+		bctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		n, err := cb.Run(bctx)
+		if err != nil {
+			log.Error("backfill carriers failed", "err", err)
+			return
+		}
+		log.Info("backfill carriers done", "shipments_updated", n)
+	}()
+
 	// Run an initial pass right away so the first deploy has data fast.
 	go runWC(ctx, log, wcSync)
 	go runFrenet(ctx, log, frenetSync)
