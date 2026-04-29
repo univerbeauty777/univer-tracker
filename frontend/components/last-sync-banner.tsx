@@ -21,7 +21,10 @@ export function LastSyncBanner() {
     async function load() {
       try {
         const s = await fetchSyncStatus();
-        if (mounted) setSources(s.sources);
+        if (mounted) {
+          setSources(s.sources);
+          setError(null); // recovery — clear stale error from a previous tick
+        }
       } catch (e) {
         if (mounted) setError(e instanceof Error ? e.message : "erro");
       }

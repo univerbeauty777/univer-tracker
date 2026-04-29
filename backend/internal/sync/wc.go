@@ -98,7 +98,7 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 	// If the order doesn't expose a carrier in meta, fall back to the
 	// shipping method title — it usually contains "Correios PAC", "SEDEX"
 	// etc., enough for the SLA mapping.
-	carrier := tracking.Carrier
+	carrier := canonicalizeCarrier(tracking.Carrier)
 	if carrier == "" && len(w.ShippingLines) > 0 {
 		carrier = inferCarrierFromMethod(w.ShippingLines[0].MethodTitle)
 	}
@@ -211,6 +211,43 @@ func inferTags(w *woocommerce.Order, total float64, method string) []string {
 // carrier+service slug we can pass to the SLA table. Recognises Correios
 // SEDEX/PAC, Jadlog, Loggi and a couple of others; otherwise returns the
 // raw title so the dashboard at least shows something useful.
+// canonicalizeCarrier maps a WC-meta-supplied carrier name to the
+// canonical casing used by inferCarrierFromMethod, so "Correios - Sedex"
+// (lowercase variant some plugins emit) doesn't show up alongside
+// "Correios - SEDEX" on the dashboard.
+func canonicalizeCarrier(s string) string {
+	t := strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case t == "":
+		return ""
+	case strings.Contains(t, "sedex"), strings.Contains(t, "expresso"):
+		return "Correios - SEDEX"
+	case strings.Contains(t, "pac"), strings.Contains(t, "econ"):
+		return "Correios - PAC"
+	case strings.Contains(t, "jadlog"):
+		return "Jadlog"
+	case strings.Contains(t, "loggi"):
+		return "Loggi"
+	case strings.Contains(t, "azul"):
+		return "Azul Cargo"
+	case strings.Contains(t, "total"):
+		return "Total Express"
+	case strings.Contains(t, "braspress"):
+		return "Braspress"
+	case strings.Contains(t, "dhl"):
+		return "DHL"
+	case strings.Contains(t, "fedex"):
+		return "FedEx"
+	case strings.Contains(t, "motoboy"):
+		return "Motoboy"
+	case strings.Contains(t, "correios"):
+		return "Correios"
+	}
+	// Untouched value — let inferCarrierFromMethod's fallback handle it
+	// downstream when the meta value is junk.
+	return strings.TrimSpace(s)
+}
+
 func inferCarrierFromMethod(title string) string {
 	t := strings.ToLower(title)
 	switch {
