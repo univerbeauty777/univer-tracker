@@ -58,46 +58,72 @@ type CarrierStats struct {
 // not "in the funnel" — counting them as breached/idle would inflate
 // the alerts and hide the real problems.
 func (a *Analytics) FetchOverview(ctx context.Context) (*Overview, error) {
+	// Lead-time uses o.created_at (the actual order date) — s.created_at is
+	// when our DB inserted the row, which can be AFTER delivered_at for
+	// historical backfills, producing a negative delta that gets filtered
+	// out by COALESCE-on-NULL and zeroes the KPI.
+	// "Preparação" is order → posted_at (much more reliably populated than
+	// ready_for_pickup_at, which depends on a Frenet event that not every
+	// carrier emits).
 	const q = `
 SELECT
-    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')                                          AS total_30d,
-    COUNT(*) FILTER (WHERE delivered_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days')           AS delivered_30d,
+    COUNT(*) FILTER (WHERE s.created_at >= NOW() - INTERVAL '30 days')                                        AS total_30d,
+    COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL AND s.delivered_at >= NOW() - INTERVAL '30 days')       AS delivered_30d,
     COUNT(*) FILTER (
-        WHERE sla_state = 'COMPLETED'
-          AND delivered_at IS NOT NULL
-          AND delivered_at >= NOW() - INTERVAL '30 days'
+        WHERE s.sla_state = 'COMPLETED'
+          AND s.delivered_at IS NOT NULL
+          AND s.delivered_at >= NOW() - INTERVAL '30 days'
     )                                                                                                          AS on_time_30d,
-    COUNT(*) FILTER (WHERE sla_state = 'AT_RISK' AND delivered_at IS NULL)                                     AS at_risk,
-    COUNT(*) FILTER (WHERE sla_state IN ('BREACHED', 'COMPLETED_LATE'))                                        AS breached,
-    COUNT(*) FILTER (WHERE delivered_at IS NULL)                                                               AS in_progress,
+    COUNT(*) FILTER (WHERE s.sla_state = 'AT_RISK' AND s.delivered_at IS NULL)                                AS at_risk,
+    COUNT(*) FILTER (WHERE s.sla_state IN ('BREACHED', 'COMPLETED_LATE'))                                     AS breached,
+    COUNT(*) FILTER (WHERE s.delivered_at IS NULL)                                                            AS in_progress,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400.0)
-        FILTER (WHERE delivered_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
+        AVG(EXTRACT(EPOCH FROM (s.delivered_at - o.created_at)) / 86400.0)
+        FILTER (
+            WHERE s.delivered_at IS NOT NULL
+              AND s.delivered_at >= NOW() - INTERVAL '30 days'
+              AND s.delivered_at > o.created_at
+        ),
         0
     )                                                                                                          AS avg_delivery_days,
     COUNT(*) FILTER (
-        WHERE idle_since IS NOT NULL
-          AND idle_since < NOW() - INTERVAL '4 days'
-          AND delivered_at IS NULL
-          AND last_event_at IS NOT NULL
+        WHERE s.idle_since IS NOT NULL
+          AND s.idle_since < NOW() - INTERVAL '4 days'
+          AND s.delivered_at IS NULL
+          AND s.last_event_at IS NOT NULL
     )                                                                                                          AS idle_alarms,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (ready_for_pickup_at - created_at)) / 3600.0)
-        FILTER (WHERE ready_for_pickup_at IS NOT NULL AND created_at >= NOW() - INTERVAL '30 days'),
+        AVG(EXTRACT(EPOCH FROM (s.posted_at - o.created_at)) / 3600.0)
+        FILTER (
+            WHERE s.posted_at IS NOT NULL
+              AND o.created_at >= NOW() - INTERVAL '30 days'
+              AND s.posted_at > o.created_at
+        ),
         0
     )                                                                                                          AS avg_preparing_hours,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (delivered_at - posted_at)) / 3600.0)
-        FILTER (WHERE delivered_at IS NOT NULL AND posted_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
+        AVG(EXTRACT(EPOCH FROM (s.delivered_at - s.posted_at)) / 3600.0)
+        FILTER (
+            WHERE s.delivered_at IS NOT NULL
+              AND s.posted_at IS NOT NULL
+              AND s.delivered_at >= NOW() - INTERVAL '30 days'
+              AND s.delivered_at > s.posted_at
+        ),
         0
     )                                                                                                          AS avg_in_transit_hours,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (delivered_at - out_for_delivery_at)) / 3600.0)
-        FILTER (WHERE delivered_at IS NOT NULL AND out_for_delivery_at IS NOT NULL AND delivered_at >= NOW() - INTERVAL '30 days'),
+        AVG(EXTRACT(EPOCH FROM (s.delivered_at - s.out_for_delivery_at)) / 3600.0)
+        FILTER (
+            WHERE s.delivered_at IS NOT NULL
+              AND s.out_for_delivery_at IS NOT NULL
+              AND s.delivered_at >= NOW() - INTERVAL '30 days'
+              AND s.delivered_at > s.out_for_delivery_at
+        ),
         0
     )                                                                                                          AS avg_last_mile_hours
-FROM shipments
-WHERE tracking_code <> ''`
+FROM shipments s
+JOIN orders o ON o.id = s.order_id
+WHERE s.tracking_code <> ''`
 
 	var o Overview
 	err := a.Pool.QueryRow(ctx, q).Scan(
