@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   LayoutGrid,
   MapPin,
+  MessageCircle,
   Package,
   Settings,
   Truck,
@@ -28,6 +29,12 @@ const NAV: Section[] = [
       { label: "Análise de gargalos", href: "/gargalos", icon: Zap },
       { label: "Transportadoras", href: "/transportadoras", icon: Truck },
       { label: "SLA por etapa", href: "/sla", icon: Activity },
+    ],
+  },
+  {
+    title: "Automação",
+    items: [
+      { label: "Triggers de envio", href: "/configuracoes/triggers", icon: MessageCircle },
     ],
   },
   {

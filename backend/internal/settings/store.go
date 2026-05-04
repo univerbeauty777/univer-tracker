@@ -46,9 +46,10 @@ type FrenetConfig struct {
 
 // WAHAConfig is the persisted shape of the WhatsApp HTTP API integration.
 type WAHAConfig struct {
-	URL     string `json:"url"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
+	URL            string `json:"url"`
+	APIKey         string `json:"api_key"`
+	DefaultSession string `json:"default_session"`
+	Enabled        bool   `json:"enabled"`
 }
 
 // Store reads and writes typed configuration to app_settings.

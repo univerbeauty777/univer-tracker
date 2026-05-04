@@ -35,6 +35,7 @@ type Orders struct {
 // OrderNotifier is what we need from a notification channel.
 type OrderNotifier interface {
 	SendText(ctx context.Context, phone, message string) error
+	SendTextWith(ctx context.Context, session, phone, message string) error
 }
 
 // Facets handles GET /api/v1/orders/facets.
@@ -405,12 +406,14 @@ func (h *Orders) Notify(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Message  string `json:"message"`
 		Template string `json:"template,omitempty"`
+		Session  string `json:"session,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.Message = strings.TrimSpace(body.Message)
+	body.Session = strings.TrimSpace(body.Session)
 	if body.Message == "" {
 		writeError(w, http.StatusUnprocessableEntity, "message is required")
 		return
@@ -433,7 +436,7 @@ func (h *Orders) Notify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendErr := h.Notifier.SendText(ctx, dbOrder.CustomerPhone, body.Message)
+	sendErr := h.Notifier.SendTextWith(ctx, body.Session, dbOrder.CustomerPhone, body.Message)
 	rec := store.Notification{
 		OrderID:  dbOrder.ID,
 		Channel:  "waha",

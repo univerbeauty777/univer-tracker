@@ -13,6 +13,7 @@ import (
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/config"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/notifier"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/store"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/sync"
@@ -56,9 +57,19 @@ func run() error {
 	shipmentsRepo := &store.Shipments{Pool: pool}
 	eventsRepo := &store.Events{Pool: pool}
 	stateRepo := &store.SyncStates{Pool: pool}
+	auditRepo := &store.Audit{Pool: pool}
+	triggersRepo := &store.NotificationTriggers{Pool: pool, StoreID: defaultStoreID}
 
 	settingsStore := settings.New(pool)
 	resolver := integrations.New(settingsStore, cfg)
+	wahaNotifier := notifier.New(resolver, "")
+	dispatcher := &sync.TriggerDispatcher{
+		Triggers: triggersRepo,
+		Audit:    auditRepo,
+		Orders:   ordersRepo,
+		Sender:   wahaNotifier,
+		Log:      log,
+	}
 
 	wcSync := &sync.WooCommerce{
 		Store:        ordersRepo,
@@ -66,6 +77,7 @@ func run() error {
 		State:        stateRepo,
 		Integrations: resolver,
 		StoreID:      defaultStoreID,
+		Dispatcher:   dispatcher,
 		Log:          log,
 	}
 	frenetSync := &sync.Frenet{
@@ -73,6 +85,7 @@ func run() error {
 		Events:       eventsRepo,
 		Integrations: resolver,
 		BatchSize:    50,
+		Dispatcher:   dispatcher,
 		Log:          log,
 	}
 

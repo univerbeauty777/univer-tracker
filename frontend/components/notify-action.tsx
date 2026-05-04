@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { notifyOrder } from "@/lib/api";
+import { fetchIntegrations, fetchWAHASessions, notifyOrder } from "@/lib/api";
+import type { WAHASession } from "@/lib/types";
 
 const TEMPLATES: { key: string; label: string; build: (ctx: NotifyContext) => string }[] = [
   {
@@ -45,6 +46,32 @@ export function NotifyAction({ context, hasPhone }: { context: NotifyContext; ha
   const [message, setMessage] = useState<string>(TEMPLATES[0].build(context));
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sessions, setSessions] = useState<WAHASession[]>([]);
+  const [session, setSession] = useState<string>("");
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+  // Load sessions + the configured default the first time the modal opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [iresp, sresp] = await Promise.all([
+          fetchIntegrations(),
+          fetchWAHASessions(),
+        ]);
+        if (cancelled) return;
+        setSessions(sresp.sessions ?? []);
+        if (sresp.error) setSessionsError(sresp.error);
+        setSession((current) => current || iresp.waha?.default_session || "");
+      } catch (e) {
+        if (!cancelled) setSessionsError(e instanceof Error ? e.message : "erro");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   function pickTemplate(key: string) {
     setTemplate(key);
@@ -55,7 +82,7 @@ export function NotifyAction({ context, hasPhone }: { context: NotifyContext; ha
   function send() {
     start(async () => {
       try {
-        const r = await notifyOrder(context.orderId, message, template);
+        const r = await notifyOrder(context.orderId, message, template, session);
         setResult({ ok: r.ok, text: r.message ?? r.error ?? (r.ok ? "Enviado" : "Falhou") });
         if (r.ok) {
           setTimeout(() => {
@@ -115,6 +142,30 @@ export function NotifyAction({ context, hasPhone }: { context: NotifyContext; ha
                   {t.label}
                 </button>
               ))}
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Sessão WAHA
+              </label>
+              <select
+                value={session}
+                onChange={(e) => setSession(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">— usar padrão da integração —</option>
+                {sessions.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name}
+                    {s.status ? ` · ${s.status.toLowerCase()}` : ""}
+                  </option>
+                ))}
+              </select>
+              {sessionsError ? (
+                <p className="mt-1 text-[10px] text-warning">
+                  {sessionsError}
+                </p>
+              ) : null}
             </div>
 
             <textarea

@@ -4,6 +4,7 @@ import type {
   FrenetIntegration,
   FunnelResponse,
   IntegrationsResponse,
+  NotificationTrigger,
   OrderDetail,
   OrderHistoryResponse,
   OrdersResponse,
@@ -11,7 +12,9 @@ import type {
   SyncStatusResponse,
   TestResult,
   TransitionsResponse,
+  TriggersResponse,
   WAHAIntegration,
+  WAHASessionsResponse,
   WooCommerceIntegration,
 } from "./types";
 
@@ -93,11 +96,12 @@ export async function notifyOrder(
   id: number,
   message: string,
   template?: string,
+  session?: string,
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   const res = await fetch(url(`/api/v1/orders/${id}/notify`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, template }),
+    body: JSON.stringify({ message, template, session }),
   });
   return res.json();
 }
@@ -115,6 +119,35 @@ export async function bulkHideOrders(ids: number[]): Promise<{ hidden: number; r
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(`bulk hide failed: ${res.status} ${txt}`);
+  }
+  return res.json();
+}
+
+export async function fetchWAHASessions(): Promise<WAHASessionsResponse> {
+  const res = await fetch(url("/api/v1/settings/integrations/waha/sessions"), {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`waha sessions failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTriggers(): Promise<TriggersResponse> {
+  const res = await fetch(url("/api/v1/settings/triggers"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`triggers fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function saveTriggers(
+  triggers: NotificationTrigger[],
+): Promise<TriggersResponse> {
+  const res = await fetch(url("/api/v1/settings/triggers"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ triggers }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`triggers save failed: ${res.status} ${txt}`);
   }
   return res.json();
 }

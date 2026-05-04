@@ -176,8 +176,36 @@ export interface FrenetIntegration {
 export interface WAHAIntegration {
   url: string;
   api_key: string;
+  default_session: string;
   enabled: boolean;
   configured: boolean;
+}
+
+export interface WAHASession {
+  name: string;
+  status: string;
+}
+
+export interface WAHASessionsResponse {
+  sessions: WAHASession[];
+  error?: string;
+}
+
+export type TriggerEventKey = "postado" | "in_transit" | "delivered" | "breached";
+
+export interface NotificationTrigger {
+  id?: number;
+  store_id?: number;
+  event_key: TriggerEventKey;
+  enabled: boolean;
+  template: string;
+  session: string;
+  cooldown_minutes: number;
+  updated_at?: string;
+}
+
+export interface TriggersResponse {
+  triggers: NotificationTrigger[];
 }
 
 export interface IntegrationsResponse {

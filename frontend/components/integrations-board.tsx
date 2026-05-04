@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { CheckCircle2, Eye, EyeOff, Loader2, Plug, ShieldAlert, ShoppingBag, Truck, MessageCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
+  fetchWAHASessions,
   testIntegration,
   updateFrenetIntegration,
   updateWAHAIntegration,
@@ -15,6 +16,7 @@ import type {
   IntegrationsResponse,
   TestResult,
   WAHAIntegration,
+  WAHASession,
   WooCommerceIntegration,
 } from "@/lib/types";
 
@@ -236,10 +238,31 @@ function WAHACard({
   const [pending, start] = useTransition();
   const [test, setTest] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<WAHASession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   function patch(p: Partial<WAHAIntegration>) {
     setForm({ ...form, ...p });
   }
+
+  async function loadSessions() {
+    setSessionsLoading(true);
+    try {
+      const r = await fetchWAHASessions();
+      setSessions(r.sessions ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao listar sessões");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  // Lazy-load when the integration is configured so users don't pay for a
+  // gateway round-trip if they're just opening the page to read the URL.
+  useEffect(() => {
+    if (value.configured) loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.configured]);
 
   function save() {
     setError(null);
@@ -249,6 +272,7 @@ function WAHACard({
         onSaved(next);
         setForm(next.waha);
         setTest({ ok: true, message: "Salvo." });
+        loadSessions();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erro ao salvar");
       }
@@ -264,6 +288,7 @@ function WAHACard({
         setForm(next.waha);
         const r = await testIntegration("waha");
         setTest(r);
+        loadSessions();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erro ao testar");
       }
@@ -293,6 +318,41 @@ function WAHACard({
           hint="Header X-Api-Key enviado em cada chamada."
         />
       </div>
+
+      <div className="mt-4">
+        <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Sessão padrão
+        </label>
+        <div className="mt-1 flex items-center gap-2">
+          <select
+            value={form.default_session ?? ""}
+            onChange={(e) => patch({ default_session: e.target.value })}
+            disabled={!value.configured || sessionsLoading}
+            className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+          >
+            <option value="">— sem sessão padrão (escolher por envio) —</option>
+            {sessions.map((s) => (
+              <option key={s.name} value={s.name}>
+                {s.name}
+                {s.status ? ` · ${s.status.toLowerCase()}` : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={loadSessions}
+            disabled={!value.configured || sessionsLoading}
+            className="rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            {sessionsLoading ? "…" : "Atualizar"}
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Sessão usada por padrão pelos triggers automáticos e pelo botão
+          “Notificar via WhatsApp”. Pode ser sobrescrita por envio.
+        </p>
+      </div>
+
       <Footer
         pending={pending}
         test={test}

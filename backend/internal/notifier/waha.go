@@ -34,9 +34,17 @@ func New(r *integrations.Resolver, session string) *WAHA {
 	return &WAHA{Resolver: r, Session: session}
 }
 
-// SendText posts a plain-text message to the given E.164-ish phone number.
-// We accept Brazilian numbers in any common shape and normalize them.
+// SendText posts a plain-text message using the configured default
+// session.
 func (w *WAHA) SendText(ctx context.Context, phone, message string) error {
+	return w.SendTextWith(ctx, "", phone, message)
+}
+
+// SendTextWith posts a plain-text message and lets the caller override
+// the WAHA session. Pass an empty `session` to fall back to the
+// configured default (settings.waha.default_session) — and finally to
+// the literal "default" session if neither is set.
+func (w *WAHA) SendTextWith(ctx context.Context, session, phone, message string) error {
 	cfg, err := w.Resolver.WAHAConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve waha: %w", err)
@@ -50,8 +58,19 @@ func (w *WAHA) SendText(ctx context.Context, phone, message string) error {
 		return err
 	}
 
+	useSession := strings.TrimSpace(session)
+	if useSession == "" {
+		useSession = strings.TrimSpace(cfg.DefaultSession)
+	}
+	if useSession == "" {
+		useSession = w.Session
+	}
+	if useSession == "" {
+		useSession = "default"
+	}
+
 	body, _ := json.Marshal(map[string]any{
-		"session": w.Session,
+		"session": useSession,
 		"chatId":  chatID,
 		"text":    message,
 	})
@@ -76,6 +95,60 @@ func (w *WAHA) SendText(ctx context.Context, phone, message string) error {
 		return fmt.Errorf("waha http %d: %s", resp.StatusCode, string(raw))
 	}
 	return nil
+}
+
+// SessionInfo is the slim shape of a WAHA session the dashboard cares
+// about — name + working state, nothing else.
+type SessionInfo struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// ListSessions calls WAHA's /api/sessions and returns the names + status
+// so the UI can populate a session picker.
+func (w *WAHA) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	cfg, err := w.Resolver.WAHAConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve waha: %w", err)
+	}
+	if cfg.URL == "" || cfg.APIKey == "" {
+		return nil, ErrNotConfigured
+	}
+
+	url := strings.TrimRight(cfg.URL, "/") + "/api/sessions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("X-Api-Key", cfg.APIKey)
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("waha list sessions: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("waha http %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var raw []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode sessions: %w", err)
+	}
+	out := make([]SessionInfo, 0, len(raw))
+	for _, s := range raw {
+		if s.Name == "" {
+			continue
+		}
+		out = append(out, SessionInfo{Name: s.Name, Status: s.Status})
+	}
+	return out, nil
 }
 
 var digitsOnly = regexp.MustCompile(`\D+`)

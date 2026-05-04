@@ -10,6 +10,7 @@ import (
 
 	"github.com/univerbeauty777/univer-tracker/backend/internal/frenet"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/integrations"
+	"github.com/univerbeauty777/univer-tracker/backend/internal/notifier"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
 )
@@ -18,6 +19,7 @@ import (
 type Settings struct {
 	Store    *settings.Store
 	Resolver *integrations.Resolver
+	Notifier *notifier.WAHA
 	Log      *slog.Logger
 }
 
@@ -51,10 +53,11 @@ type frenetView struct {
 }
 
 type wahaView struct {
-	URL        string `json:"url"`
-	APIKey     string `json:"api_key"`
-	Enabled    bool   `json:"enabled"`
-	Configured bool   `json:"configured"`
+	URL            string `json:"url"`
+	APIKey         string `json:"api_key"`
+	DefaultSession string `json:"default_session"`
+	Enabled        bool   `json:"enabled"`
+	Configured     bool   `json:"configured"`
 }
 
 // Get handles GET /api/v1/settings/integrations.
@@ -83,10 +86,11 @@ func (h *Settings) Get(w http.ResponseWriter, r *http.Request) {
 			Configured:    fr.APIToken != "",
 		},
 		WAHA: wahaView{
-			URL:        waha.URL,
-			APIKey:     maskIfSet(waha.APIKey),
-			Enabled:    waha.Enabled,
-			Configured: waha.URL != "" && waha.APIKey != "",
+			URL:            waha.URL,
+			APIKey:         maskIfSet(waha.APIKey),
+			DefaultSession: waha.DefaultSession,
+			Enabled:        waha.Enabled,
+			Configured:     waha.URL != "" && waha.APIKey != "",
 		},
 	})
 }
@@ -159,9 +163,10 @@ func (h *Settings) UpdateWAHA(w http.ResponseWriter, r *http.Request) {
 
 	current, _ := h.Store.GetWAHA(ctx)
 	updated := settings.WAHAConfig{
-		URL:     firstNonEmpty(strings.TrimSpace(body.URL), current.URL),
-		APIKey:  keepOrReplace(body.APIKey, current.APIKey),
-		Enabled: body.Enabled,
+		URL:            firstNonEmpty(strings.TrimSpace(body.URL), current.URL),
+		APIKey:         keepOrReplace(body.APIKey, current.APIKey),
+		DefaultSession: firstNonEmpty(strings.TrimSpace(body.DefaultSession), current.DefaultSession),
+		Enabled:        body.Enabled,
 	}
 
 	if err := h.Store.SetWAHA(ctx, updated); err != nil {
@@ -214,6 +219,29 @@ func (h *Settings) TestFrenet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Token Frenet aceito pela API."})
+}
+
+// ListWAHASessions exposes the current WAHA gateway sessions so the
+// dashboard can show a picker (default for triggers, override per
+// notification).
+func (h *Settings) ListWAHASessions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	waha := h.Notifier
+	if waha == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []any{}})
+		return
+	}
+	sessions, err := waha.ListSessions(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"sessions": []any{},
+			"error":    err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 }
 
 // TestWAHA pings /api/sessions which is the standard WAHA health endpoint.

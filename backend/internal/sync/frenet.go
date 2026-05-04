@@ -22,6 +22,7 @@ type Frenet struct {
 	Events       *store.Events
 	Integrations *integrations.Resolver
 	BatchSize    int
+	Dispatcher   *TriggerDispatcher // optional: nil disables WhatsApp triggers
 	Log          *slog.Logger
 }
 
@@ -82,6 +83,10 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 	if resp.ErrorMessage != "" {
 		return fmt.Errorf("frenet error: %s", resp.ErrorMessage)
 	}
+
+	// Snapshot before mutation so the trigger dispatcher can detect
+	// transitions (Postado, Em trânsito, Entregue, Atrasado).
+	before := Snapshot(ship)
 
 	now := time.Now().UTC()
 	ship.LastSyncedAt = &now
@@ -154,6 +159,12 @@ func (s *Frenet) refreshOne(ctx context.Context, client *frenet.Client, ship *st
 
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
+	}
+
+	// Fire any configured WhatsApp triggers for milestones the
+	// shipment just crossed. Errors are swallowed by the dispatcher.
+	if s.Dispatcher != nil {
+		s.Dispatcher.OnShipmentSynced(ctx, before, ship)
 	}
 	return nil
 }

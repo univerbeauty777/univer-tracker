@@ -26,6 +26,7 @@ type WooCommerce struct {
 	State        *store.SyncStates
 	Integrations *integrations.Resolver
 	StoreID      int64
+	Dispatcher   *TriggerDispatcher // optional: pre-Upsert snapshot diff for milestones
 	Log          *slog.Logger
 }
 
@@ -108,6 +109,15 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 	// flagged as breached because their ETA had "already passed" by the time
 	// we saw them.
 	now := time.Now().UTC()
+
+	// Read the existing shipment row (if any) so the dispatcher can
+	// detect transitions caused by WC marking an order "completed".
+	existing, _ := s.Shipments.ListByOrder(ctx, dbOrder.ID)
+	var before TriggerSnapshotInput
+	if len(existing) > 0 {
+		before = TriggerSnapshotInput{Shipment: &existing[0]}
+	}
+
 	ship := &store.Shipment{
 		OrderID:      dbOrder.ID,
 		TrackingCode: strings.ToUpper(strings.ReplaceAll(tracking.Number, " ", "")),
@@ -117,6 +127,20 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 		Health:       "unknown",
 		CreatedAt:    now,
 	}
+	if before.Shipment != nil {
+		// Preserve the existing milestone stamps so the upsert doesn't
+		// erase them (Frenet is authoritative; WC just provides the
+		// initial wiring).
+		ship.LabelIssuedAt = before.Shipment.LabelIssuedAt
+		ship.PreparingAt = before.Shipment.PreparingAt
+		ship.ReadyForPickupAt = before.Shipment.ReadyForPickupAt
+		ship.PostedAt = before.Shipment.PostedAt
+		ship.InTransitAt = before.Shipment.InTransitAt
+		ship.AtDestinationCityAt = before.Shipment.AtDestinationCityAt
+		ship.OutForDeliveryAt = before.Shipment.OutForDeliveryAt
+		ship.DeliveredAt = before.Shipment.DeliveredAt
+	}
+
 	// If WC already says the order is completed/delivered, mirror that
 	// into the shipment so KPIs (avg delivery, OTD) work without waiting
 	// for Frenet to backfill the 'Entregue' event.
@@ -125,7 +149,9 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 		if t.IsZero() {
 			t = now
 		}
-		ship.DeliveredAt = &t
+		if ship.DeliveredAt == nil || ship.DeliveredAt.IsZero() {
+			ship.DeliveredAt = &t
+		}
 		ship.Status = "delivered"
 	}
 	sla.Apply(ship, sla.Compute(ship, now))
@@ -135,7 +161,19 @@ func (s *WooCommerce) persist(ctx context.Context, w *woocommerce.Order) error {
 	if _, err := s.Shipments.Upsert(ctx, ship); err != nil {
 		return fmt.Errorf("upsert shipment: %w", err)
 	}
+
+	// Fire trigger notifications if WC just flipped this to delivered
+	// (or, in rare cases, marked it BREACHED via custom flow).
+	if s.Dispatcher != nil && before.Shipment != nil {
+		s.Dispatcher.OnShipmentSynced(ctx, Snapshot(before.Shipment), ship)
+	}
 	return nil
+}
+
+// TriggerSnapshotInput is a tiny wrapper so we can carry a (maybe-nil)
+// pre-state into the diff helpers without scattering nil checks.
+type TriggerSnapshotInput struct {
+	Shipment *store.Shipment
 }
 
 // mapOrder projects WooCommerce → store.Order, preferring shipping address

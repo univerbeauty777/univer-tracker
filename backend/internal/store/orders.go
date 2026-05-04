@@ -316,6 +316,37 @@ WHERE store_id = $1 AND wc_order_id = $2`
 	return &o, nil
 }
 
+// GetByID fetches an order by its primary key (used by the worker
+// trigger dispatcher, which already has the shipment row in hand).
+func (r *Orders) GetByID(ctx context.Context, id int64) (*Order, error) {
+	const q = `
+SELECT id, store_id, wc_order_id, status,
+       customer_name, customer_email, customer_phone, customer_city, customer_uf,
+       shipping_method, total_brl, declared_value, tags,
+       paid_at, created_at, updated_at
+FROM orders
+WHERE id = $1`
+
+	var o Order
+	var tagsRaw []byte
+	err := r.Pool.QueryRow(ctx, q, id).Scan(
+		&o.ID, &o.StoreID, &o.WCOrderID, &o.Status,
+		&o.CustomerName, &o.CustomerEmail, &o.CustomerPhone, &o.CustomerCity, &o.CustomerUF,
+		&o.ShippingMethod, &o.TotalBRL, &o.DeclaredValue, &tagsRaw,
+		&o.PaidAt, &o.CreatedAt, &o.UpdatedAt,
+	)
+	if len(tagsRaw) > 0 {
+		_ = json.Unmarshal(tagsRaw, &o.Tags)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get order by id: %w", err)
+	}
+	return &o, nil
+}
+
 // UpdateStatus persists a new WC status (mirror of the source of truth).
 func (r *Orders) UpdateStatus(ctx context.Context, id int64, status string) error {
 	_, err := r.Pool.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, status, id)

@@ -89,6 +89,29 @@ VALUES ($1, $2, $3, COALESCE($4, '{}'::jsonb), $5, $6)`
 	return nil
 }
 
+// HasNotificationSince returns true when there's a notifications row
+// for (order_id, template) sent at or after `since` with status != 'failed'.
+// Used by the trigger dispatcher to enforce per-event cooldowns and
+// avoid double-firing when Frenet replays the same milestone event.
+//
+// A `since` of the zero value matches any prior successful send (any-time
+// dedup, useful for cooldown=0 → "send at most once ever per shipment").
+func (a *Audit) HasNotificationSince(ctx context.Context, orderID int64, template string, since time.Time) (bool, error) {
+	const q = `
+SELECT EXISTS (
+    SELECT 1 FROM notifications
+    WHERE order_id = $1
+      AND template = $2
+      AND status <> 'failed'
+      AND sent_at >= $3
+)`
+	var exists bool
+	if err := a.Pool.QueryRow(ctx, q, orderID, template, since).Scan(&exists); err != nil {
+		return false, fmt.Errorf("has notification since: %w", err)
+	}
+	return exists, nil
+}
+
 // ListNotifications returns notifications for an order, newest first.
 func (a *Audit) ListNotifications(ctx context.Context, orderID int64) ([]Notification, error) {
 	const q = `

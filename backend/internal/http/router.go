@@ -88,15 +88,25 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	settingsH := &handler.Settings{
 		Store:    settingsStore,
 		Resolver: resolver,
+		Notifier: wahaNotifier,
 		Log:      log,
 	}
 	mux.HandleFunc("GET /api/v1/settings/integrations", settingsH.Get)
 	mux.HandleFunc("PATCH /api/v1/settings/integrations/woocommerce", settingsH.UpdateWooCommerce)
 	mux.HandleFunc("PATCH /api/v1/settings/integrations/frenet", settingsH.UpdateFrenet)
 	mux.HandleFunc("PATCH /api/v1/settings/integrations/waha", settingsH.UpdateWAHA)
+	mux.HandleFunc("GET /api/v1/settings/integrations/waha/sessions", settingsH.ListWAHASessions)
 	mux.HandleFunc("POST /api/v1/settings/integrations/woocommerce/test", settingsH.TestWooCommerce)
 	mux.HandleFunc("POST /api/v1/settings/integrations/frenet/test", settingsH.TestFrenet)
 	mux.HandleFunc("POST /api/v1/settings/integrations/waha/test", settingsH.TestWAHA)
+
+	triggersStore := &store.NotificationTriggers{Pool: pool, StoreID: defaultStoreID}
+	triggersH := &handler.Triggers{
+		Store: triggersStore,
+		Log:   log,
+	}
+	mux.HandleFunc("GET /api/v1/settings/triggers", triggersH.List)
+	mux.HandleFunc("PUT /api/v1/settings/triggers", triggersH.Save)
 
 	return loggingMiddleware(log)(corsMiddleware(cfg.App.PublicURL)(mux))
 }
