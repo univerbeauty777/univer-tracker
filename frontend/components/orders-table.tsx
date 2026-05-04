@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronRight,
+  Loader2,
+  Trash2,
+} from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { SlaBadge } from "@/components/sla-badge";
 import { TagList } from "@/components/tag-chip";
 import { RelativeTime } from "@/components/relative-time";
+import { Button } from "@/components/ui/button";
+import { bulkHideOrders } from "@/lib/api";
 import { dedupeName, formatBRL, formatDate } from "@/lib/format";
 import type { OrderListItem, SLAState } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -31,6 +40,72 @@ export function OrdersTable({
   const params = useSearchParams();
   const sort = (params.get("sort") || "created_at") as SortKey;
   const dir = (params.get("dir") || "desc") as SortDir;
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset selection whenever the visible page changes (filter, paginate,
+  // sort) — surfacing stale ids invites accidental deletes.
+  const orderIdsKey = useMemo(() => orders.map((o) => o.id).join(","), [orders]);
+  useEffect(() => {
+    setSelected(new Set());
+  }, [orderIdsKey]);
+
+  const visibleIds = useMemo(() => orders.map((o) => o.id), [orders]);
+  const allSelected =
+    orders.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someSelected = !allSelected && visibleIds.some((id) => selected.has(id));
+
+  function toggleAll() {
+    setSelected((prev) => {
+      if (allSelected) {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const id of visibleIds) next.add(id);
+      return next;
+    });
+  }
+
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  function confirmBulkDelete() {
+    if (selected.size === 0) return;
+    setError(null);
+    setConfirming(true);
+  }
+
+  function runBulkDelete() {
+    const ids = Array.from(selected);
+    start(async () => {
+      try {
+        const res = await bulkHideOrders(ids);
+        setConfirming(false);
+        clearSelection();
+        router.refresh();
+        if (res.hidden < res.requested) {
+          setError(`Apenas ${res.hidden} de ${res.requested} foram ocultados.`);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erro ao excluir");
+      }
+    });
+  }
 
   const pushParams = (sp: URLSearchParams) => {
     const qs = sp.toString();
@@ -56,67 +131,226 @@ export function OrdersTable({
     pushParams(sp);
   }
 
-  const start = total === 0 ? 0 : offset + 1;
+  const start1 = total === 0 ? 0 : offset + 1;
   const end = Math.min(offset + orders.length, total);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5 text-xs text-muted-foreground">
-        <span>
-          {total > 0 ? (
-            <>
-              <span className="font-medium text-foreground">{start}–{end}</span> de {total} pedidos
-            </>
-          ) : (
-            "Nenhum pedido"
-          )}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-            className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
-          >
-            ← anterior
-          </button>
-          <button
-            disabled={end >= total}
-            onClick={() => setOffset(offset + limit)}
-            className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
-          >
-            próximo →
-          </button>
+    <div className="space-y-3">
+      {selected.size > 0 ? (
+        <BulkActionBar
+          count={selected.size}
+          onClear={clearSelection}
+          onDelete={confirmBulkDelete}
+          pending={pending}
+        />
+      ) : null}
+
+      {error ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5 text-xs text-muted-foreground">
+          <span>
+            {total > 0 ? (
+              <>
+                <span className="font-medium text-foreground">
+                  {start1}–{end}
+                </span>{" "}
+                de {total} pedidos
+              </>
+            ) : (
+              "Nenhum pedido"
+            )}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+              className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
+            >
+              ← anterior
+            </button>
+            <button
+              disabled={end >= total}
+              onClick={() => setOffset(offset + limit)}
+              className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
+            >
+              próximo →
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/60 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="w-10 px-3 py-3">
+                  <SelectCheckbox
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    onChange={toggleAll}
+                    label={
+                      allSelected
+                        ? "Desmarcar todos da página"
+                        : "Selecionar todos da página"
+                    }
+                  />
+                </th>
+                <Th label="Pedido" sortKey="created_at" sort={sort} dir={dir} onSort={setSort} />
+                <Th label="Cliente" sortKey="customer_name" sort={sort} dir={dir} onSort={setSort} />
+                <th className="px-4 py-3 text-left font-medium">SLA</th>
+                <th className="px-4 py-3 text-left font-medium">Status</th>
+                <th className="px-4 py-3 text-left font-medium">Tags</th>
+                <Th label="Último evento" sortKey="last_event" sort={sort} dir={dir} onSort={setSort} />
+                <Th label="Total" sortKey="total" sort={sort} dir={dir} onSort={setSort} align="right" />
+                <th className="w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {orders.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-16 text-center text-sm text-muted-foreground">
+                    Nenhum pedido bate com esses filtros.
+                  </td>
+                </tr>
+              ) : (
+                orders.map((o) => (
+                  <Row
+                    key={o.id}
+                    order={o}
+                    selected={selected.has(o.id)}
+                    onToggle={() => toggleOne(o.id)}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border/60 text-[11px] uppercase tracking-wide text-muted-foreground">
-              <Th label="Pedido" sortKey="created_at" sort={sort} dir={dir} onSort={setSort} />
-              <Th label="Cliente" sortKey="customer_name" sort={sort} dir={dir} onSort={setSort} />
-              <th className="px-4 py-3 text-left font-medium">SLA</th>
-              <th className="px-4 py-3 text-left font-medium">Status</th>
-              <th className="px-4 py-3 text-left font-medium">Tags</th>
-              <Th label="Último evento" sortKey="last_event" sort={sort} dir={dir} onSort={setSort} />
-              <Th label="Total" sortKey="total" sort={sort} dir={dir} onSort={setSort} align="right" />
-              <th className="w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {orders.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-6 py-16 text-center text-sm text-muted-foreground">
-                  Nenhum pedido bate com esses filtros.
-                </td>
-              </tr>
-            ) : (
-              orders.map((o) => <Row key={o.id} order={o} />)
-            )}
-          </tbody>
-        </table>
+      {confirming ? (
+        <ConfirmBulkDelete
+          count={selected.size}
+          pending={pending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={runBulkDelete}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function BulkActionBar({
+  count,
+  onClear,
+  onDelete,
+  pending,
+}: {
+  count: number;
+  onClear: () => void;
+  onDelete: () => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="sticky top-2 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm shadow-elevated backdrop-blur-md">
+      <div className="flex items-center gap-2 text-violet-100">
+        <span className="font-medium">
+          {count} {count === 1 ? "pedido selecionado" : "pedidos selecionados"}
+        </span>
+        <button
+          onClick={onClear}
+          className="text-xs text-violet-300 hover:text-violet-100"
+        >
+          limpar
+        </button>
+      </div>
+      <Button
+        size="sm"
+        variant="destructive"
+        onClick={onDelete}
+        disabled={pending}
+      >
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+        Excluir selecionados
+      </Button>
+    </div>
+  );
+}
+
+function ConfirmBulkDelete({
+  count,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !pending) onCancel();
+      }}
+    >
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-4">
+          <h2 className="font-display text-lg font-semibold">
+            Excluir {count} {count === 1 ? "pedido" : "pedidos"}?
+          </h2>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Os pedidos saem da rastreiaki imediatamente. O dado original
+            permanece no WooCommerce — só some daqui. Esta ação não pode
+            ser desfeita pela interface.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={onConfirm}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            Confirmar exclusão
+          </Button>
+        </div>
       </div>
     </div>
+  );
+}
+
+function SelectCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      ref={(el) => {
+        if (el) el.indeterminate = Boolean(indeterminate);
+      }}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+      className="size-4 cursor-pointer rounded border-border/80 bg-background text-violet-500 accent-violet-500 focus:ring-1 focus:ring-violet-500"
+    />
   );
 }
 
@@ -156,7 +390,15 @@ function Th({
   );
 }
 
-function Row({ order: o }: { order: OrderListItem }) {
+function Row({
+  order: o,
+  selected,
+  onToggle,
+}: {
+  order: OrderListItem;
+  selected: boolean;
+  onToggle: () => void;
+}) {
   // idleDays is computed client-side only — Date.now() differs between
   // SSR pass and client hydration, which trips React #418 around midnight
   // boundaries. Server renders null (no badge), client mounts and fills.
@@ -169,7 +411,19 @@ function Row({ order: o }: { order: OrderListItem }) {
   }, [o.tracking.last_event_at]);
   const customer = dedupeName(o.customer_name);
   return (
-    <tr className="border-b border-border/40 transition-colors last:border-0 hover:bg-muted/40">
+    <tr
+      className={cn(
+        "border-b border-border/40 transition-colors last:border-0 hover:bg-muted/40",
+        selected && "bg-violet-500/5",
+      )}
+    >
+      <td className="px-3 py-3 align-top">
+        <SelectCheckbox
+          checked={selected}
+          onChange={onToggle}
+          label={`Selecionar pedido ${o.id}`}
+        />
+      </td>
       <td className="px-4 py-3">
         <Link href={`/pedidos/${o.id}`} className="font-mono text-xs font-medium hover:underline">
           #{o.id}
@@ -227,3 +481,4 @@ function Row({ order: o }: { order: OrderListItem }) {
     </tr>
   );
 }
+

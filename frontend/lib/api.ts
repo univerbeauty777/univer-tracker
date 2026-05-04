@@ -106,6 +106,19 @@ export function ordersExportURL(params: Record<string, string | undefined>): str
   return url("/api/v1/orders/export.csv", params);
 }
 
+export async function bulkHideOrders(ids: number[]): Promise<{ hidden: number; requested: number }> {
+  const res = await fetch(url("/api/v1/orders/bulk-hide"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`bulk hide failed: ${res.status} ${txt}`);
+  }
+  return res.json();
+}
+
 export async function fetchFunnel(days = 30): Promise<FunnelResponse> {
   const res = await fetch(url("/api/v1/analytics/funnel", { days }), { cache: "no-store" });
   if (!res.ok) throw new Error(`funnel ${res.status}`);

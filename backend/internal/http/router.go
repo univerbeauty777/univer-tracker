@@ -48,6 +48,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	mux.HandleFunc("GET /api/v1/orders", orders.List)
 	mux.HandleFunc("GET /api/v1/orders/facets", orders.FacetsList)
 	mux.HandleFunc("GET /api/v1/orders/export.csv", orders.ExportCSV)
+	mux.HandleFunc("POST /api/v1/orders/bulk-hide", orders.BulkHide)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orders.Get)
 	mux.HandleFunc("GET /api/v1/orders/{id}/history", orders.History)
 	mux.HandleFunc("GET /api/v1/orders/{id}/breakdown", orders.Breakdown)

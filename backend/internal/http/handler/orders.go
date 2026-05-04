@@ -236,6 +236,39 @@ func (h *Orders) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+// BulkHide handles POST /api/v1/orders/bulk-hide. Accepts a body of
+// `{"ids": [wc_order_id, ...]}` and flips hidden_at on all matching
+// rows so they disappear from the dashboard. The next WC sync respects
+// the flag — hidden orders never bounce back.
+func (h *Orders) BulkHide(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if len(body.IDs) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "ids is required")
+		return
+	}
+	if len(body.IDs) > 1000 {
+		writeError(w, http.StatusRequestEntityTooLarge, "max 1000 ids per call")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	n, err := h.Orders.HideByWCIDs(ctx, h.StoreID, body.IDs)
+	if err != nil {
+		h.Log.Error("bulk hide failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not hide orders")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hidden": n, "requested": len(body.IDs)})
+}
+
 // UpdateStatus handles PATCH /api/v1/orders/{id}/status.
 func (h *Orders) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	wcID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

@@ -97,7 +97,10 @@ type OrderRow struct {
 // plus the total count matching the filter (for pagination).
 func (r *Orders) List(ctx context.Context, f ListFilters) (ListResult, error) {
 	args := []any{}
-	where := []string{"1=1"}
+	// Hidden orders are bulk-deleted from the dashboard but kept in the
+	// DB so the next WC sync doesn't resurrect them. List/facets always
+	// filter them out — there's no UI to surface hidden rows.
+	where := []string{"o.hidden_at IS NULL"}
 
 	if f.StoreID > 0 {
 		args = append(args, f.StoreID)
@@ -320,6 +323,39 @@ func (r *Orders) UpdateStatus(ctx context.Context, id int64, status string) erro
 		return fmt.Errorf("update status: %w", err)
 	}
 	return nil
+}
+
+// HideByWCIDs bulk-hides orders by their WooCommerce ids. Returns the
+// number of rows that flipped from visible to hidden (idempotent: rows
+// already hidden are not double-counted).
+func (r *Orders) HideByWCIDs(ctx context.Context, storeID int64, wcIDs []int64) (int64, error) {
+	if len(wcIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.Pool.Exec(ctx, `
+UPDATE orders
+SET hidden_at = NOW(), updated_at = NOW()
+WHERE store_id = $1 AND wc_order_id = ANY($2) AND hidden_at IS NULL`,
+		storeID, wcIDs)
+	if err != nil {
+		return 0, fmt.Errorf("bulk hide: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// HideByCustomerNameLike bulk-hides orders whose customer_name matches
+// a SQL LIKE pattern (case-insensitive). Used for the one-shot E2E
+// cleanup at deploy time.
+func (r *Orders) HideByCustomerNameLike(ctx context.Context, storeID int64, pattern string) (int64, error) {
+	tag, err := r.Pool.Exec(ctx, `
+UPDATE orders
+SET hidden_at = NOW(), updated_at = NOW()
+WHERE store_id = $1 AND customer_name ILIKE $2 AND hidden_at IS NULL`,
+		storeID, pattern)
+	if err != nil {
+		return 0, fmt.Errorf("hide by name: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func joinAnd(parts []string) string {

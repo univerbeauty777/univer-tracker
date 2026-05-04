@@ -109,6 +109,28 @@ func run() error {
 		log.Info("backfill carriers done", "shipments_updated", n)
 	}()
 
+	// One-shot: hide synthetic test orders the dashboard shouldn't show
+	// ("E2E Buyer" from end-to-end testing, "webhook testa" from
+	// webhook validation). Idempotent — already-hidden rows stay
+	// hidden and are not re-counted.
+	go func() {
+		bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		patterns := []string{"E2E Buyer", "webhook testa", "webhook test"}
+		var total int64
+		for _, p := range patterns {
+			n, err := ordersRepo.HideByCustomerNameLike(bctx, defaultStoreID, p)
+			if err != nil {
+				log.Error("hide synthetic orders failed", "pattern", p, "err", err)
+				continue
+			}
+			total += n
+		}
+		if total > 0 {
+			log.Info("hid synthetic test orders", "rows", total)
+		}
+	}()
+
 	// Run an initial pass right away so the first deploy has data fast.
 	go runWC(ctx, log, wcSync)
 	go runFrenet(ctx, log, frenetSync)

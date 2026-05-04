@@ -70,7 +70,8 @@ SELECT
     COUNT(*) FILTER (WHERE s.out_for_delivery_at    IS NOT NULL AND s.created_at >= NOW() - INTERVAL '%d days') AS saiu,
     COUNT(*) FILTER (WHERE s.delivered_at           IS NOT NULL AND s.created_at >= NOW() - INTERVAL '%d days') AS entregue
 FROM shipments s
-WHERE s.tracking_code <> ''`,
+JOIN orders o ON o.id = s.order_id
+WHERE s.tracking_code <> '' AND o.hidden_at IS NULL`,
 		windowDays, windowDays, windowDays, windowDays, windowDays, windowDays, windowDays)
 
 	var pedido, etiqueta, prep, coleta, postado, saiu, entregue int
@@ -119,8 +120,10 @@ WITH base AS (
         EXTRACT(EPOCH FROM (s.%[1]s - s.created_at)) / 3600.0 AS hours,
         %[2]s AS sla_hours
     FROM shipments s
+    JOIN orders o ON o.id = s.order_id
     WHERE s.%[1]s IS NOT NULL
       AND s.created_at >= NOW() - INTERVAL '%[3]d days'
+      AND o.hidden_at IS NULL
 )
 SELECT
     COALESCE(NULLIF(carrier, ''), 'desconhecida') AS carrier,

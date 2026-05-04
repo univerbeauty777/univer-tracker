@@ -123,7 +123,7 @@ SELECT
     )                                                                                                          AS avg_last_mile_hours
 FROM shipments s
 JOIN orders o ON o.id = s.order_id
-WHERE s.tracking_code <> ''`
+WHERE s.tracking_code <> '' AND o.hidden_at IS NULL`
 
 	var o Overview
 	err := a.Pool.QueryRow(ctx, q).Scan(
@@ -150,32 +150,33 @@ func (a *Analytics) fetchPrevious(ctx context.Context) (*PreviousPeriod, error) 
 	const q = `
 SELECT
     COUNT(*) FILTER (
-        WHERE created_at >= NOW() - INTERVAL '60 days'
-          AND created_at < NOW() - INTERVAL '30 days'
+        WHERE s.created_at >= NOW() - INTERVAL '60 days'
+          AND s.created_at < NOW() - INTERVAL '30 days'
     ) AS total,
     COUNT(*) FILTER (
-        WHERE delivered_at IS NOT NULL
-          AND delivered_at >= NOW() - INTERVAL '60 days'
-          AND delivered_at < NOW() - INTERVAL '30 days'
+        WHERE s.delivered_at IS NOT NULL
+          AND s.delivered_at >= NOW() - INTERVAL '60 days'
+          AND s.delivered_at < NOW() - INTERVAL '30 days'
     ) AS delivered,
     COUNT(*) FILTER (
-        WHERE delivered_at IS NOT NULL
-          AND delivered_at >= NOW() - INTERVAL '60 days'
-          AND delivered_at < NOW() - INTERVAL '30 days'
-          AND estimated_delivery IS NOT NULL
-          AND delivered_at::date <= estimated_delivery
+        WHERE s.delivered_at IS NOT NULL
+          AND s.delivered_at >= NOW() - INTERVAL '60 days'
+          AND s.delivered_at < NOW() - INTERVAL '30 days'
+          AND s.estimated_delivery IS NOT NULL
+          AND s.delivered_at::date <= s.estimated_delivery
     ) AS on_time,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400.0)
+        AVG(EXTRACT(EPOCH FROM (s.delivered_at - s.created_at)) / 86400.0)
         FILTER (
-            WHERE delivered_at IS NOT NULL
-              AND delivered_at >= NOW() - INTERVAL '60 days'
-              AND delivered_at < NOW() - INTERVAL '30 days'
+            WHERE s.delivered_at IS NOT NULL
+              AND s.delivered_at >= NOW() - INTERVAL '60 days'
+              AND s.delivered_at < NOW() - INTERVAL '30 days'
         ),
         0
     ) AS avg_days
-FROM shipments
-WHERE tracking_code <> ''`
+FROM shipments s
+JOIN orders o ON o.id = s.order_id
+WHERE s.tracking_code <> '' AND o.hidden_at IS NULL`
 
 	var p PreviousPeriod
 	err := a.Pool.QueryRow(ctx, q).Scan(&p.Total30d, &p.Delivered30d, &p.OnTime30d, &p.AvgDeliveryDays)
@@ -195,17 +196,19 @@ func (a *Analytics) FetchCarriers(ctx context.Context, limit int) ([]CarrierStat
 	}
 	const q = `
 SELECT
-    COALESCE(NULLIF(carrier, ''), 'desconhecida') AS carrier,
+    COALESCE(NULLIF(s.carrier, ''), 'desconhecida') AS carrier,
     COUNT(*) AS total,
-    COUNT(*) FILTER (WHERE health = 'breached') AS breached,
+    COUNT(*) FILTER (WHERE s.health = 'breached') AS breached,
     COALESCE(
-        AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400.0) FILTER (WHERE delivered_at IS NOT NULL),
+        AVG(EXTRACT(EPOCH FROM (s.delivered_at - s.created_at)) / 86400.0) FILTER (WHERE s.delivered_at IS NOT NULL),
         0
     ) AS avg_days
-FROM shipments
-WHERE created_at >= NOW() - INTERVAL '30 days'
-  AND tracking_code <> ''
-  AND carrier <> ''
+FROM shipments s
+JOIN orders o ON o.id = s.order_id
+WHERE s.created_at >= NOW() - INTERVAL '30 days'
+  AND s.tracking_code <> ''
+  AND s.carrier <> ''
+  AND o.hidden_at IS NULL
 GROUP BY 1
 ORDER BY total DESC
 LIMIT $1`

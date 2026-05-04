@@ -32,11 +32,13 @@ type FacetValue struct {
 func (f *Facets) All(ctx context.Context, storeID int64) (FacetCounts, error) {
 	out := FacetCounts{}
 
+	// All facets exclude hidden orders so dropdowns don't surface filters
+	// that won't return any rows once applied.
 	if err := f.fetch(ctx, &out.Carriers, `
 SELECT s.carrier, COUNT(DISTINCT o.id)
 FROM orders o
 LEFT JOIN shipments s ON s.order_id = o.id
-WHERE o.store_id = $1 AND s.carrier IS NOT NULL AND s.carrier <> ''
+WHERE o.store_id = $1 AND o.hidden_at IS NULL AND s.carrier IS NOT NULL AND s.carrier <> ''
 GROUP BY s.carrier
 ORDER BY COUNT(DISTINCT o.id) DESC, s.carrier`, storeID); err != nil {
 		return out, fmt.Errorf("carriers: %w", err)
@@ -45,7 +47,7 @@ ORDER BY COUNT(DISTINCT o.id) DESC, s.carrier`, storeID); err != nil {
 	if err := f.fetch(ctx, &out.UFs, `
 SELECT customer_uf, COUNT(*)
 FROM orders
-WHERE store_id = $1 AND customer_uf <> ''
+WHERE store_id = $1 AND hidden_at IS NULL AND customer_uf <> ''
 GROUP BY customer_uf
 ORDER BY COUNT(*) DESC, customer_uf`, storeID); err != nil {
 		return out, fmt.Errorf("ufs: %w", err)
@@ -54,7 +56,7 @@ ORDER BY COUNT(*) DESC, customer_uf`, storeID); err != nil {
 	if err := f.fetch(ctx, &out.Statuses, `
 SELECT status, COUNT(*)
 FROM orders
-WHERE store_id = $1 AND status <> ''
+WHERE store_id = $1 AND hidden_at IS NULL AND status <> ''
 GROUP BY status
 ORDER BY COUNT(*) DESC, status`, storeID); err != nil {
 		return out, fmt.Errorf("statuses: %w", err)
@@ -64,7 +66,7 @@ ORDER BY COUNT(*) DESC, status`, storeID); err != nil {
 SELECT s.health, COUNT(*)
 FROM orders o
 LEFT JOIN shipments s ON s.order_id = o.id
-WHERE o.store_id = $1 AND s.health IS NOT NULL
+WHERE o.store_id = $1 AND o.hidden_at IS NULL AND s.health IS NOT NULL
 GROUP BY s.health
 ORDER BY COUNT(*) DESC, s.health`, storeID); err != nil {
 		return out, fmt.Errorf("health: %w", err)
