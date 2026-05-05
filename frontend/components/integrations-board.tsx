@@ -261,7 +261,6 @@ function WAHACard({
   // gateway round-trip if they're just opening the page to read the URL.
   useEffect(() => {
     if (value.configured) loadSessions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.configured]);
 
   function save() {

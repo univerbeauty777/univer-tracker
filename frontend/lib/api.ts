@@ -55,7 +55,6 @@ function url(path: string, params?: Record<string, unknown>): string {
   }
   const qs = sp.toString();
   if (base === "") {
-    // Browser: relative URL
     return qs ? `${path}?${qs}` : path;
   }
   const u = new URL(path, base);
@@ -63,33 +62,66 @@ function url(path: string, params?: Record<string, unknown>): string {
   return u.toString();
 }
 
-export async function fetchOrders(params: OrdersQuery = {}): Promise<OrdersResponse> {
-  const res = await fetch(url("/api/v1/orders", { ...params }), { cache: "no-store" });
-  if (!res.ok) throw new Error(`orders fetch failed: ${res.status}`);
-  return res.json();
+// Default upper bound on a single API call. The backend itself enforces
+// 25s; we add ~5s headroom so the network error surfaces here as a
+// proper timeout instead of a generic failed fetch when the backend is
+// stuck. Long endpoints (CSV export) bypass this helper.
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+interface ApiFetchOptions extends RequestInit {
+  timeoutMs?: number;
 }
 
-export async function fetchFacets(): Promise<Facets> {
-  const res = await fetch(url("/api/v1/orders/facets"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`facets fetch failed: ${res.status}`);
-  return res.json();
+async function apiFetch(input: string, init: ApiFetchOptions = {}): Promise<Response> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, signal: externalSignal, ...rest } = init;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+
+  // If the caller passed their own signal (component unmount, etc.) wire
+  // it through so an abort there cancels our fetch too.
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), {
+        once: true,
+      });
+    }
+  }
+
+  try {
+    return await fetch(input, { cache: "no-store", ...rest, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
-  const res = await fetch(url("/api/v1/sync/status"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`sync status failed: ${res.status}`);
-  return res.json();
+async function getJSON<T>(path: string, params?: object, init?: ApiFetchOptions): Promise<T> {
+  const res = await apiFetch(url(path, params as Record<string, unknown> | undefined), init);
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  return res.json() as Promise<T>;
 }
 
-export async function triggerSync(): Promise<void> {
-  const res = await fetch(url("/api/v1/sync/run"), { method: "POST" });
+export async function fetchOrders(params: OrdersQuery = {}, init?: ApiFetchOptions): Promise<OrdersResponse> {
+  return getJSON("/api/v1/orders", params, init);
+}
+
+export async function fetchFacets(init?: ApiFetchOptions): Promise<Facets> {
+  return getJSON("/api/v1/orders/facets", undefined, init);
+}
+
+export async function fetchSyncStatus(init?: ApiFetchOptions): Promise<SyncStatusResponse> {
+  return getJSON("/api/v1/sync/status", undefined, init);
+}
+
+export async function triggerSync(init?: ApiFetchOptions): Promise<void> {
+  const res = await apiFetch(url("/api/v1/sync/run"), { method: "POST", ...init });
   if (!res.ok) throw new Error(`sync trigger failed: ${res.status}`);
 }
 
-export async function fetchOrderHistory(id: number): Promise<OrderHistoryResponse> {
-  const res = await fetch(url(`/api/v1/orders/${id}/history`), { cache: "no-store" });
-  if (!res.ok) throw new Error(`history fetch failed: ${res.status}`);
-  return res.json();
+export async function fetchOrderHistory(id: number, init?: ApiFetchOptions): Promise<OrderHistoryResponse> {
+  return getJSON(`/api/v1/orders/${id}/history`, undefined, init);
 }
 
 export async function notifyOrder(
@@ -98,7 +130,7 @@ export async function notifyOrder(
   template?: string,
   session?: string,
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
-  const res = await fetch(url(`/api/v1/orders/${id}/notify`), {
+  const res = await apiFetch(url(`/api/v1/orders/${id}/notify`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, template, session }),
@@ -111,7 +143,7 @@ export function ordersExportURL(params: Record<string, string | undefined>): str
 }
 
 export async function bulkHideOrders(ids: number[]): Promise<{ hidden: number; requested: number }> {
-  const res = await fetch(url("/api/v1/orders/bulk-hide"), {
+  const res = await apiFetch(url("/api/v1/orders/bulk-hide"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
@@ -123,24 +155,18 @@ export async function bulkHideOrders(ids: number[]): Promise<{ hidden: number; r
   return res.json();
 }
 
-export async function fetchWAHASessions(): Promise<WAHASessionsResponse> {
-  const res = await fetch(url("/api/v1/settings/integrations/waha/sessions"), {
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`waha sessions failed: ${res.status}`);
-  return res.json();
+export async function fetchWAHASessions(init?: ApiFetchOptions): Promise<WAHASessionsResponse> {
+  return getJSON("/api/v1/settings/integrations/waha/sessions", undefined, init);
 }
 
-export async function fetchTriggers(): Promise<TriggersResponse> {
-  const res = await fetch(url("/api/v1/settings/triggers"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`triggers fetch failed: ${res.status}`);
-  return res.json();
+export async function fetchTriggers(init?: ApiFetchOptions): Promise<TriggersResponse> {
+  return getJSON("/api/v1/settings/triggers", undefined, init);
 }
 
 export async function saveTriggers(
   triggers: NotificationTrigger[],
 ): Promise<TriggersResponse> {
-  const res = await fetch(url("/api/v1/settings/triggers"), {
+  const res = await apiFetch(url("/api/v1/settings/triggers"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ triggers }),
@@ -152,40 +178,30 @@ export async function saveTriggers(
   return res.json();
 }
 
-export async function fetchFunnel(days = 30): Promise<FunnelResponse> {
-  const res = await fetch(url("/api/v1/analytics/funnel", { days }), { cache: "no-store" });
-  if (!res.ok) throw new Error(`funnel ${res.status}`);
-  return res.json();
+export async function fetchFunnel(days = 30, init?: ApiFetchOptions): Promise<FunnelResponse> {
+  return getJSON("/api/v1/analytics/funnel", { days }, init);
 }
 
-export async function fetchTransitions(days = 30): Promise<TransitionsResponse> {
-  const res = await fetch(url("/api/v1/analytics/transitions", { days }), { cache: "no-store" });
-  if (!res.ok) throw new Error(`transitions ${res.status}`);
-  return res.json();
+export async function fetchTransitions(days = 30, init?: ApiFetchOptions): Promise<TransitionsResponse> {
+  return getJSON("/api/v1/analytics/transitions", { days }, init);
 }
 
-export async function fetchBreakdown(orderId: number): Promise<BreakdownResponse> {
-  const res = await fetch(url(`/api/v1/orders/${orderId}/breakdown`), { cache: "no-store" });
-  if (!res.ok) throw new Error(`breakdown ${res.status}`);
-  return res.json();
+export async function fetchBreakdown(orderId: number, init?: ApiFetchOptions): Promise<BreakdownResponse> {
+  return getJSON(`/api/v1/orders/${orderId}/breakdown`, undefined, init);
 }
 
-export async function fetchOverview(): Promise<OverviewResponse> {
-  const res = await fetch(url("/api/v1/analytics/overview"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`overview fetch failed: ${res.status}`);
-  return res.json();
+export async function fetchOverview(init?: ApiFetchOptions): Promise<OverviewResponse> {
+  return getJSON("/api/v1/analytics/overview", undefined, init);
 }
 
-export async function fetchIntegrations(): Promise<IntegrationsResponse> {
-  const res = await fetch(url("/api/v1/settings/integrations"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`integrations fetch failed: ${res.status}`);
-  return res.json();
+export async function fetchIntegrations(init?: ApiFetchOptions): Promise<IntegrationsResponse> {
+  return getJSON("/api/v1/settings/integrations", undefined, init);
 }
 
 export async function updateWooCommerceIntegration(
   body: Partial<WooCommerceIntegration>,
 ): Promise<IntegrationsResponse> {
-  const res = await fetch(url("/api/v1/settings/integrations/woocommerce"), {
+  const res = await apiFetch(url("/api/v1/settings/integrations/woocommerce"), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -197,7 +213,7 @@ export async function updateWooCommerceIntegration(
 export async function updateFrenetIntegration(
   body: Partial<FrenetIntegration>,
 ): Promise<IntegrationsResponse> {
-  const res = await fetch(url("/api/v1/settings/integrations/frenet"), {
+  const res = await apiFetch(url("/api/v1/settings/integrations/frenet"), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -209,7 +225,7 @@ export async function updateFrenetIntegration(
 export async function updateWAHAIntegration(
   body: Partial<WAHAIntegration>,
 ): Promise<IntegrationsResponse> {
-  const res = await fetch(url("/api/v1/settings/integrations/waha"), {
+  const res = await apiFetch(url("/api/v1/settings/integrations/waha"), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -221,17 +237,16 @@ export async function updateWAHAIntegration(
 export async function testIntegration(
   provider: "woocommerce" | "frenet" | "waha",
 ): Promise<TestResult> {
-  const res = await fetch(url(`/api/v1/settings/integrations/${provider}/test`), {
+  const res = await apiFetch(url(`/api/v1/settings/integrations/${provider}/test`), {
     method: "POST",
+    timeoutMs: 15_000,
   });
   if (!res.ok) throw new Error(`test failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchOrder(id: number): Promise<OrderDetail> {
-  const res = await fetch(url(`/api/v1/orders/${id}`), { cache: "no-store" });
-  if (!res.ok) throw new Error(`order ${id} fetch failed: ${res.status}`);
-  return res.json();
+export async function fetchOrder(id: number, init?: ApiFetchOptions): Promise<OrderDetail> {
+  return getJSON(`/api/v1/orders/${id}`, undefined, init);
 }
 
 export async function updateOrderStatus(
@@ -239,7 +254,7 @@ export async function updateOrderStatus(
   status: string,
   note?: string,
 ): Promise<OrderDetail> {
-  const res = await fetch(url(`/api/v1/orders/${id}/status`), {
+  const res = await apiFetch(url(`/api/v1/orders/${id}/status`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status, note }),

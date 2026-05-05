@@ -17,39 +17,44 @@ export function LastSyncBanner() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
+    const ac = new AbortController();
+    let cancelled = false;
+
     async function load() {
       try {
-        const s = await fetchSyncStatus();
-        if (mounted) {
-          setSources(s.sources);
-          setError(null); // recovery — clear stale error from a previous tick
-        }
+        const s = await fetchSyncStatus({ signal: ac.signal, timeoutMs: 8_000 });
+        if (cancelled) return;
+        setSources(s.sources);
+        setError(null); // recovery — clear stale error from a previous tick
       } catch (e) {
-        if (mounted) setError(e instanceof Error ? e.message : "erro");
+        if (cancelled || ac.signal.aborted) return;
+        setError(e instanceof Error ? e.message : "erro");
       }
     }
+
     load();
     const t = setInterval(load, REFRESH_MS);
     return () => {
-      mounted = false;
+      cancelled = true;
       clearInterval(t);
+      ac.abort();
     };
   }, []);
 
   function syncNow() {
     setError(null);
     start(async () => {
+      const ac = new AbortController();
       try {
         // Snapshot timestamps to detect when the worker finishes; a
         // hard-coded 4s pause was racing the WC pull on big catalogues.
         const before = sources?.map((s) => s.last_synced_at).join("|") ?? "";
-        await triggerSync();
+        await triggerSync({ signal: ac.signal, timeoutMs: 10_000 });
         let attempt = 0;
         while (attempt < 12) {
           await new Promise((r) => setTimeout(r, 2500));
           try {
-            const s = await fetchSyncStatus();
+            const s = await fetchSyncStatus({ signal: ac.signal, timeoutMs: 8_000 });
             const after = s.sources.map((x) => x.last_synced_at).join("|");
             if (after !== before) {
               setSources(s.sources);
@@ -65,6 +70,8 @@ export function LastSyncBanner() {
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "erro ao sincronizar");
+      } finally {
+        ac.abort();
       }
     });
   }
