@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -19,6 +20,25 @@ import (
 	"github.com/univerbeauty777/univer-tracker/backend/internal/sync"
 	"github.com/univerbeauty777/univer-tracker/backend/pkg/logger"
 )
+
+// safeGo runs fn in a goroutine and recovers any panic so a single broken
+// job can't take the worker process down. Panics are logged with stack.
+func safeGo(log interface {
+	Error(msg string, args ...any)
+}, name string, fn func()) {
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Error("panic in worker goroutine",
+					"job", name,
+					"recover", fmt.Sprint(rec),
+					"stack", string(debug.Stack()),
+				)
+			}
+		}()
+		fn()
+	}()
+}
 
 const (
 	wcInterval     = 5 * time.Minute
@@ -95,7 +115,7 @@ func run() error {
 	// One-shot: replay tracking_events into stage timestamps so existing
 	// shipments inherit per-etapa data without waiting for the next
 	// Frenet event.
-	go func() {
+	safeGo(log, "backfill_stages", func() {
 		bf := &sync.BackfillStages{Pool: pool, Shipments: shipmentsRepo, Log: log}
 		bctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
@@ -105,12 +125,12 @@ func run() error {
 			return
 		}
 		log.Info("backfill stages done", "shipments_updated", n)
-	}()
+	})
 
 	// One-shot: normalise legacy carrier values that hold shipping_method
 	// titles ("Frete grátis", "Expresso") so the dashboard groups them
 	// under the actual carrier (Correios - PAC / SEDEX, Jadlog, …).
-	go func() {
+	safeGo(log, "backfill_carriers", func() {
 		cb := &sync.BackfillCarriers{Pool: pool, Log: log}
 		bctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
@@ -120,13 +140,13 @@ func run() error {
 			return
 		}
 		log.Info("backfill carriers done", "shipments_updated", n)
-	}()
+	})
 
 	// One-shot: hide synthetic test orders the dashboard shouldn't show
 	// ("E2E Buyer" from end-to-end testing, "webhook testa" from
 	// webhook validation). Idempotent — already-hidden rows stay
 	// hidden and are not re-counted.
-	go func() {
+	safeGo(log, "hide_synthetic_orders", func() {
 		bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		patterns := []string{"E2E Buyer", "webhook testa", "webhook test"}
@@ -142,11 +162,11 @@ func run() error {
 		if total > 0 {
 			log.Info("hid synthetic test orders", "rows", total)
 		}
-	}()
+	})
 
 	// Run an initial pass right away so the first deploy has data fast.
-	go runWC(ctx, log, wcSync)
-	go runFrenet(ctx, log, frenetSync)
+	safeGo(log, "wc_sync_initial", func() { runWC(ctx, log, wcSync) })
+	safeGo(log, "frenet_sync_initial", func() { runFrenet(ctx, log, frenetSync) })
 
 	wcTicker := time.NewTicker(wcInterval)
 	defer wcTicker.Stop()
@@ -160,14 +180,17 @@ func run() error {
 			cancel()
 			return nil
 		case <-wcTicker.C:
-			go runWC(ctx, log, wcSync)
+			safeGo(log, "wc_sync", func() { runWC(ctx, log, wcSync) })
 		case <-frenetTicker.C:
-			go runFrenet(ctx, log, frenetSync)
+			safeGo(log, "frenet_sync", func() { runFrenet(ctx, log, frenetSync) })
 		}
 	}
 }
 
-func runWC(ctx context.Context, log interface{ Info(msg string, args ...any); Error(msg string, args ...any) }, s *sync.WooCommerce) {
+func runWC(ctx context.Context, log interface {
+	Info(msg string, args ...any)
+	Error(msg string, args ...any)
+}, s *sync.WooCommerce) {
 	stats, err := s.Run(ctx)
 	if err != nil {
 		log.Error("wc sync failed", "err", err)
@@ -179,7 +202,10 @@ func runWC(ctx context.Context, log interface{ Info(msg string, args ...any); Er
 		"duration_ms", stats.Finished.Sub(stats.Started).Milliseconds())
 }
 
-func runFrenet(ctx context.Context, log interface{ Info(msg string, args ...any); Error(msg string, args ...any) }, s *sync.Frenet) {
+func runFrenet(ctx context.Context, log interface {
+	Info(msg string, args ...any)
+	Error(msg string, args ...any)
+}, s *sync.Frenet) {
 	stats, err := s.Run(ctx)
 	if err != nil {
 		log.Error("frenet sync failed", "err", err)

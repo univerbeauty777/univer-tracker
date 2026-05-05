@@ -108,7 +108,16 @@ func NewRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Ha
 	mux.HandleFunc("GET /api/v1/settings/triggers", triggersH.List)
 	mux.HandleFunc("PUT /api/v1/settings/triggers", triggersH.Save)
 
-	return loggingMiddleware(log)(corsMiddleware(cfg.App.PublicURL)(mux))
+	// Outer→inner: log → recover → CORS → timeout → handler. Recover sits
+	// outside CORS so panics still get the proper response and a stack
+	// trace; timeout sits inside CORS so preflight doesn't get cancelled.
+	return loggingMiddleware(log)(
+		recoverMiddleware(log)(
+			corsMiddleware(cfg.App.PublicURL)(
+				timeoutMiddleware(25 * time.Second)(mux),
+			),
+		),
+	)
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

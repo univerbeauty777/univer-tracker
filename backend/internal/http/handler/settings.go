@@ -13,7 +13,13 @@ import (
 	"github.com/univerbeauty777/univer-tracker/backend/internal/notifier"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/settings"
 	"github.com/univerbeauty777/univer-tracker/backend/internal/woocommerce"
+	"github.com/univerbeauty777/univer-tracker/backend/pkg/httpclient"
 )
+
+// settingsTestClient is a shared client for "test connection" calls so we
+// don't lean on http.DefaultClient (no transport timeouts, leaks idle
+// conns when an upstream stalls).
+var settingsTestClient = httpclient.Default()
 
 // Settings serves the integrations CRUD UI.
 type Settings struct {
@@ -266,7 +272,7 @@ func (h *Settings) TestWAHA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("X-Api-Key", cfg.APIKey)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := settingsTestClient.Do(req)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return

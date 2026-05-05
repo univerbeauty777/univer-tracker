@@ -20,6 +20,17 @@ import (
 // ErrNotConfigured surfaces when the WAHA settings are missing.
 var ErrNotConfigured = errors.New("waha not configured")
 
+// httpClient is shared by every WAHA call so we reuse keep-alive
+// connections instead of building a new pool per request.
+var httpClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 // WAHA is a thin client over the WhatsApp HTTP API gateway.
 type WAHA struct {
 	Resolver *integrations.Resolver
@@ -83,8 +94,7 @@ func (w *WAHA) SendTextWith(ctx context.Context, session, phone, message string)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", cfg.APIKey)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("waha send: %w", err)
 	}
@@ -122,8 +132,9 @@ func (w *WAHA) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	}
 	req.Header.Set("X-Api-Key", cfg.APIKey)
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
+	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	resp, err := httpClient.Do(req.WithContext(listCtx))
 	if err != nil {
 		return nil, fmt.Errorf("waha list sessions: %w", err)
 	}
