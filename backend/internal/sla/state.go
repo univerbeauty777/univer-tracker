@@ -19,9 +19,9 @@ const (
 
 // EvalResult mirrors the rastreiaki shipment SLA fields.
 type EvalResult struct {
-	State          State
-	BreachedStage  string // store column name when breached, otherwise ""
-	EstimatedAt    time.Time
+	State         State
+	BreachedStage string // store column name when breached, otherwise ""
+	EstimatedAt   time.Time
 }
 
 // Evaluate computes sla_state and sla_breached_stage for a shipment given

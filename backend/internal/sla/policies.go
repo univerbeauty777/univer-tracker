@@ -42,10 +42,10 @@ func PolicyFor(carrier, service string) Policy {
 
 // Stage represents a milestone ordered by cumulative SLA.
 type Stage struct {
-	Field      string // store column name
-	JSONField  string // JSON field in API responses
-	Label      string // PT-BR display label
-	CumHours   int    // cumulative SLA hours
+	Field     string // store column name
+	JSONField string // JSON field in API responses
+	Label     string // PT-BR display label
+	CumHours  int    // cumulative SLA hours
 }
 
 // Stages returns the milestones in chronological order for a given carrier,

@@ -216,7 +216,7 @@ LIMIT $%d OFFSET $%d`,
 		var s Shipment
 		var tagsRaw []byte
 		var (
-			sID                                                                                 *int64
+			sID                                                                               *int64
 			sTracking, sCarrier, sService, sServiceCode, sURL, sStatus, sLast, sBreachedStage *string
 			sLastAt, sETA                                                                     *time.Time
 			sLabel, sPrep, sReady, sPosted, sInTransit, sAtCity, sOFD, sDelivered             *time.Time

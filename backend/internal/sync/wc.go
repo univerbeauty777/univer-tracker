@@ -293,7 +293,7 @@ func inferCarrierFromMethod(title string) string {
 		return "Correios - SEDEX"
 	case strings.Contains(t, "pac"),
 		strings.Contains(t, "frete grátis"), strings.Contains(t, "frete gratis"),
-		strings.Contains(t, "econ"), // Econômico
+		strings.Contains(t, "econ"),        // Econômico
 		strings.Contains(t, "mini envios"): // Melhor Envio aggregator (PAC-class)
 		return "Correios - PAC"
 	case strings.Contains(t, "jadlog"):

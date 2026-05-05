@@ -54,9 +54,9 @@ func TestCompute(t *testing.T) {
 		{
 			name: "PAC near ETA, at risk",
 			ship: store.Shipment{
-				Carrier:   "Correios",
-				Service:   "PAC",
-				CreatedAt: now.AddDate(0, 0, -8),
+				Carrier:     "Correios",
+				Service:     "PAC",
+				CreatedAt:   now.AddDate(0, 0, -8),
 				LastEventAt: ptr(now.AddDate(0, 0, -1)),
 			},
 			want: HealthAtRisk,
@@ -64,9 +64,9 @@ func TestCompute(t *testing.T) {
 		{
 			name: "Jadlog 3 days past ETA, breached",
 			ship: store.Shipment{
-				Carrier:   "Jadlog",
-				Service:   "",
-				CreatedAt: now.AddDate(0, 0, -8),
+				Carrier:     "Jadlog",
+				Service:     "",
+				CreatedAt:   now.AddDate(0, 0, -8),
 				LastEventAt: ptr(now.AddDate(0, 0, -2)),
 			},
 			want: HealthBreached,
@@ -74,9 +74,9 @@ func TestCompute(t *testing.T) {
 		{
 			name: "fresh shipment idle 5 days, at risk",
 			ship: store.Shipment{
-				Carrier:   "Correios",
-				Service:   "PAC",
-				CreatedAt: now.AddDate(0, 0, -5),
+				Carrier:     "Correios",
+				Service:     "PAC",
+				CreatedAt:   now.AddDate(0, 0, -5),
 				LastEventAt: ptr(now.AddDate(0, 0, -5)),
 			},
 			want: HealthAtRisk,

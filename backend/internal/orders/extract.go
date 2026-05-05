@@ -36,13 +36,13 @@ var serviceCodeMetaKeys = []string{
 
 // TrackingInfo summarizes what we know about a shipment tied to an order.
 type TrackingInfo struct {
-	Number      string                  `json:"number"`
-	Carrier     string                  `json:"carrier"`
-	ServiceCode string                  `json:"service_code,omitempty"`
-	URL         string                  `json:"url,omitempty"`
-	Status      frenet.Status           `json:"status"`
-	StatusLabel string                  `json:"status_label"`
-	Events      []frenet.TrackingEvent  `json:"events,omitempty"`
+	Number      string                 `json:"number"`
+	Carrier     string                 `json:"carrier"`
+	ServiceCode string                 `json:"service_code,omitempty"`
+	URL         string                 `json:"url,omitempty"`
+	Status      frenet.Status          `json:"status"`
+	StatusLabel string                 `json:"status_label"`
+	Events      []frenet.TrackingEvent `json:"events,omitempty"`
 }
 
 // FromOrder picks the first tracking number/carrier/service code present in

@@ -53,43 +53,43 @@ func (h *Orders) FacetsList(w http.ResponseWriter, r *http.Request) {
 
 // orderListItem is the slim shape used by the table view.
 type orderListItem struct {
-	ID            int64       `json:"id"`
-	WCOrderID     int64       `json:"wc_order_id"`
-	Status        string      `json:"status"`
-	StatusLabel   string      `json:"status_label"`
-	CustomerName  string      `json:"customer_name"`
-	CustomerCity  string      `json:"customer_city"`
-	CustomerState string      `json:"customer_state"`
-	Total         float64     `json:"total"`
-	CreatedAt    time.Time    `json:"created_at"`
-	PaidAt       *time.Time   `json:"paid_at,omitempty"`
-	Tracking     trackingView `json:"tracking"`
+	ID            int64        `json:"id"`
+	WCOrderID     int64        `json:"wc_order_id"`
+	Status        string       `json:"status"`
+	StatusLabel   string       `json:"status_label"`
+	CustomerName  string       `json:"customer_name"`
+	CustomerCity  string       `json:"customer_city"`
+	CustomerState string       `json:"customer_state"`
+	Total         float64      `json:"total"`
+	CreatedAt     time.Time    `json:"created_at"`
+	PaidAt        *time.Time   `json:"paid_at,omitempty"`
+	Tracking      trackingView `json:"tracking"`
 }
 
 type trackingView struct {
-	Number              string          `json:"number"`
-	Carrier             string          `json:"carrier"`
-	Service             string          `json:"service,omitempty"`
-	ServiceCode         string          `json:"service_code,omitempty"`
-	URL                 string          `json:"url,omitempty"`
-	Status              frenet.Status   `json:"status"`
-	StatusLabel         string          `json:"status_label"`
-	Health              string          `json:"health"`
-	HealthLabel         string          `json:"health_label"`
-	SLAState            string          `json:"sla_state,omitempty"`
-	SLABreachedStage    string          `json:"sla_breached_stage,omitempty"`
-	LastEvent           string          `json:"last_event,omitempty"`
-	LastEventAt         *time.Time      `json:"last_event_at,omitempty"`
-	EstDelivery         *time.Time      `json:"estimated_delivery,omitempty"`
-	DeliveredAt         *time.Time      `json:"delivered_at,omitempty"`
-	LabelIssuedAt       *time.Time      `json:"label_issued_at,omitempty"`
-	PreparingAt         *time.Time      `json:"preparing_at,omitempty"`
-	ReadyForPickupAt    *time.Time      `json:"ready_for_pickup_at,omitempty"`
-	PostedAt            *time.Time      `json:"posted_at,omitempty"`
-	OutForDeliveryAt    *time.Time      `json:"out_for_delivery_at,omitempty"`
-	IdleSince           *time.Time      `json:"idle_since,omitempty"`
-	RiskScore           int16           `json:"risk_score"`
-	Events              []timelineEvent `json:"events,omitempty"`
+	Number           string          `json:"number"`
+	Carrier          string          `json:"carrier"`
+	Service          string          `json:"service,omitempty"`
+	ServiceCode      string          `json:"service_code,omitempty"`
+	URL              string          `json:"url,omitempty"`
+	Status           frenet.Status   `json:"status"`
+	StatusLabel      string          `json:"status_label"`
+	Health           string          `json:"health"`
+	HealthLabel      string          `json:"health_label"`
+	SLAState         string          `json:"sla_state,omitempty"`
+	SLABreachedStage string          `json:"sla_breached_stage,omitempty"`
+	LastEvent        string          `json:"last_event,omitempty"`
+	LastEventAt      *time.Time      `json:"last_event_at,omitempty"`
+	EstDelivery      *time.Time      `json:"estimated_delivery,omitempty"`
+	DeliveredAt      *time.Time      `json:"delivered_at,omitempty"`
+	LabelIssuedAt    *time.Time      `json:"label_issued_at,omitempty"`
+	PreparingAt      *time.Time      `json:"preparing_at,omitempty"`
+	ReadyForPickupAt *time.Time      `json:"ready_for_pickup_at,omitempty"`
+	PostedAt         *time.Time      `json:"posted_at,omitempty"`
+	OutForDeliveryAt *time.Time      `json:"out_for_delivery_at,omitempty"`
+	IdleSince        *time.Time      `json:"idle_since,omitempty"`
+	RiskScore        int16           `json:"risk_score"`
+	Events           []timelineEvent `json:"events,omitempty"`
 }
 
 type timelineEvent struct {

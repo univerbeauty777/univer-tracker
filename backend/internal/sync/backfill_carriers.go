@@ -23,17 +23,17 @@ type BackfillCarriers struct {
 // Shipments whose carrier is anything else are treated as legacy and
 // re-derived from the order's shipping_method.
 var canonicalCarrier = map[string]bool{
-	"Correios":          true,
-	"Correios - PAC":    true,
-	"Correios - SEDEX":  true,
-	"Jadlog":            true,
-	"Loggi":             true,
-	"Azul Cargo":        true,
-	"Total Express":     true,
-	"Braspress":         true,
-	"DHL":               true,
-	"FedEx":             true,
-	"Motoboy":           true,
+	"Correios":         true,
+	"Correios - PAC":   true,
+	"Correios - SEDEX": true,
+	"Jadlog":           true,
+	"Loggi":            true,
+	"Azul Cargo":       true,
+	"Total Express":    true,
+	"Braspress":        true,
+	"DHL":              true,
+	"FedEx":            true,
+	"Motoboy":          true,
 }
 
 // Run rewrites carrier where the current value is empty or doesn't

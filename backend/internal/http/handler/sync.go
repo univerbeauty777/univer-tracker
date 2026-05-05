@@ -19,9 +19,9 @@ type SyncH struct {
 }
 
 type syncStatusItem struct {
-	Entity        string     `json:"entity"`
-	LastSyncedAt  *time.Time `json:"last_synced_at"`
-	SecondsAgo    int64      `json:"seconds_ago"`
+	Entity       string     `json:"entity"`
+	LastSyncedAt *time.Time `json:"last_synced_at"`
+	SecondsAgo   int64      `json:"seconds_ago"`
 }
 
 // Status handles GET /api/v1/sync/status.
