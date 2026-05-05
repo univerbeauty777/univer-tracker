@@ -41,41 +41,68 @@ WHERE tracking_code <> ''`); err != nil {
 		return 0, fmt.Errorf("reset stage stamps: %w", err)
 	}
 
-	rows, err := b.Pool.Query(ctx, `
-SELECT id FROM shipments WHERE tracking_code <> '' ORDER BY id`)
-	if err != nil {
-		return 0, fmt.Errorf("list shipments: %w", err)
-	}
-	defer rows.Close()
-
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
+	// Keyset pagination over shipments. Loading every id upfront cost a
+	// big slice of RAM on a 512 MB worker once the table grew past a few
+	// thousand rows; chunked walks keep memory flat regardless of size.
+	const chunkSize = 500
 	updated := 0
-	for _, id := range ids {
-		ship, err := b.Shipments.GetByID(ctx, id)
-		if err != nil {
-			b.Log.Warn("backfill: get shipment", "id", id, "err", err)
-			continue
+	var lastID int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return updated, err
 		}
-		if b.replay(ctx, ship) {
-			if _, err := b.Shipments.Upsert(ctx, ship); err != nil {
-				b.Log.Warn("backfill: upsert", "id", id, "err", err)
+
+		ids, err := b.fetchChunk(ctx, lastID, chunkSize)
+		if err != nil {
+			return updated, fmt.Errorf("list shipments: %w", err)
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		for _, id := range ids {
+			ship, err := b.Shipments.GetByID(ctx, id)
+			if err != nil {
+				b.Log.Warn("backfill: get shipment", "id", id, "err", err)
 				continue
 			}
-			updated++
+			if b.replay(ctx, ship) {
+				if _, err := b.Shipments.Upsert(ctx, ship); err != nil {
+					b.Log.Warn("backfill: upsert", "id", id, "err", err)
+					continue
+				}
+				updated++
+			}
+		}
+
+		lastID = ids[len(ids)-1]
+		if len(ids) < chunkSize {
+			break
 		}
 	}
 	return updated, nil
+}
+
+func (b *BackfillStages) fetchChunk(ctx context.Context, afterID int64, limit int) ([]int64, error) {
+	rows, err := b.Pool.Query(ctx, `
+SELECT id FROM shipments
+WHERE tracking_code <> '' AND id > $1
+ORDER BY id
+LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // replay applies every event row to the shipment and recomputes SLA.

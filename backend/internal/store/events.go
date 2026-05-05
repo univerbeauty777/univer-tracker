@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -12,35 +13,37 @@ type Events struct {
 	Pool *pgxpool.Pool
 }
 
-// InsertMany adds events to a shipment, ignoring duplicates by the natural
-// key (shipment_id, occurred_at, description). Returns rows actually inserted.
+// InsertMany adds events to a shipment, ignoring duplicates by the
+// natural key (shipment_id, occurred_at, description). Uses pgx.Batch
+// so the whole set ships in a single network round-trip and the server
+// plans the INSERT once — important on Frenet sync where a single
+// shipment can carry 30+ events and we used to send 30+ separate Exec
+// calls inside the transaction.
 func (r *Events) InsertMany(ctx context.Context, evts []Event) (int, error) {
 	if len(evts) == 0 {
 		return 0, nil
 	}
-
-	tx, err := r.Pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
 
 	const q = `
 INSERT INTO tracking_events (shipment_id, occurred_at, type, description, location, raw)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (shipment_id, occurred_at, description) DO NOTHING`
 
-	count := 0
+	batch := &pgx.Batch{}
 	for _, e := range evts {
-		ct, err := tx.Exec(ctx, q, e.ShipmentID, e.OccurredAt, e.Type, e.Description, e.Location, e.Raw)
+		batch.Queue(q, e.ShipmentID, e.OccurredAt, e.Type, e.Description, e.Location, e.Raw)
+	}
+
+	br := r.Pool.SendBatch(ctx, batch)
+	defer br.Close()
+
+	count := 0
+	for range evts {
+		ct, err := br.Exec()
 		if err != nil {
 			return count, fmt.Errorf("insert event: %w", err)
 		}
 		count += int(ct.RowsAffected())
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return count, fmt.Errorf("commit tx: %w", err)
 	}
 	return count, nil
 }
@@ -67,5 +70,3 @@ ORDER BY occurred_at DESC`
 	}
 	return out, rows.Err()
 }
-
-var _ = pgxpool.Pool{}

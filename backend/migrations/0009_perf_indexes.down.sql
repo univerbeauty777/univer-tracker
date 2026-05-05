@@ -1,0 +1,10 @@
+DROP INDEX IF EXISTS idx_shipments_delivered_at;
+DROP INDEX IF EXISTS idx_shipments_out_for_delivery_at;
+DROP INDEX IF EXISTS idx_shipments_ready_for_pickup_at;
+DROP INDEX IF EXISTS idx_shipments_preparing_at;
+DROP INDEX IF EXISTS idx_shipments_label_issued_at;
+DROP INDEX IF EXISTS idx_shipments_order_id;
+DROP INDEX IF EXISTS idx_shipments_carrier_created;
+DROP INDEX IF EXISTS idx_shipments_created_at;
+DROP INDEX IF EXISTS idx_orders_store_status_created;
+DROP INDEX IF EXISTS idx_orders_store_created;

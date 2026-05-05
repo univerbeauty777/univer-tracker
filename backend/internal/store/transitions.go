@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 )
 
 // Transitions runs the rastreiaki gargalos analytics: per-stage averages,
@@ -89,18 +90,31 @@ WHERE s.tracking_code <> '' AND o.hidden_at IS NULL`,
 	}, nil
 }
 
-// All returns the full transitions stat set used by /gargalos.
+// All returns the full transitions stat set used by /gargalos. Stages run
+// in parallel — they are fully independent queries and 6 sequential
+// percentile_cont scans were the dominant cause of the gargalos endpoint
+// timing out under load. Concurrency is capped at len(stageDefs) so we
+// never exceed the pool's appetite for a single request.
 func (r *Transitions) All(ctx context.Context, windowDays int) ([]Transition, error) {
 	if windowDays <= 0 {
 		windowDays = 30
 	}
-	out := make([]Transition, 0, len(stageDefs))
-	for _, st := range stageDefs {
-		t, err := r.computeStage(ctx, st.Field, st.Label, st.ShipCol, windowDays)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
+	out := make([]Transition, len(stageDefs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(len(stageDefs))
+	for i, st := range stageDefs {
+		i, st := i, st
+		g.Go(func() error {
+			t, err := r.computeStage(gctx, st.Field, st.Label, st.ShipCol, windowDays)
+			if err != nil {
+				return err
+			}
+			out[i] = t
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

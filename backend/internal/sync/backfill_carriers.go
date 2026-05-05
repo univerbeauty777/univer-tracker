@@ -39,52 +39,74 @@ var canonicalCarrier = map[string]bool{
 // Run rewrites carrier where the current value is empty or doesn't
 // belong to the canonical set produced by inferCarrierFromMethod
 // (covers shipping_method titles like "Frete grátis", "Mini Envios..."
-// AND case mismatches like "Correios - Sedex"). Idempotent.
+// AND case mismatches like "Correios - Sedex"). Idempotent. Walks the
+// table in keyset chunks so memory stays flat regardless of size.
 func (b *BackfillCarriers) Run(ctx context.Context) (int, error) {
-	const q = `
+	const chunkSize = 500
+	updated := 0
+	var lastID int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return updated, err
+		}
+
+		rows, err := b.Pool.Query(ctx, `
 SELECT s.id, s.carrier, COALESCE(o.shipping_method, '')
 FROM shipments s
 JOIN orders o ON o.id = s.order_id
-WHERE s.tracking_code <> ''`
-	rows, err := b.Pool.Query(ctx, q)
-	if err != nil {
-		return 0, fmt.Errorf("list shipments: %w", err)
-	}
-	defer rows.Close()
+WHERE s.tracking_code <> '' AND s.id > $1
+ORDER BY s.id
+LIMIT $2`, lastID, chunkSize)
+		if err != nil {
+			return updated, fmt.Errorf("list shipments: %w", err)
+		}
 
-	type todo struct {
-		id      int64
-		carrier string
-		method  string
-	}
-	var pending []todo
-	for rows.Next() {
-		var t todo
-		if err := rows.Scan(&t.id, &t.carrier, &t.method); err != nil {
-			return 0, err
+		type todo struct {
+			id      int64
+			carrier string
+			method  string
 		}
-		if !canonicalCarrier[t.carrier] {
-			pending = append(pending, t)
+		var batch []todo
+		for rows.Next() {
+			var t todo
+			if err := rows.Scan(&t.id, &t.carrier, &t.method); err != nil {
+				rows.Close()
+				return updated, err
+			}
+			batch = append(batch, t)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return updated, err
+		}
+		rows.Close()
 
-	updated := 0
-	for _, t := range pending {
-		carrier := inferCarrierFromMethod(t.method)
-		if carrier == "" || carrier == t.carrier {
-			continue
+		if len(batch) == 0 {
+			break
 		}
-		if _, err := b.Pool.Exec(ctx, `
+
+		for _, t := range batch {
+			if canonicalCarrier[t.carrier] {
+				continue
+			}
+			carrier := inferCarrierFromMethod(t.method)
+			if carrier == "" || carrier == t.carrier {
+				continue
+			}
+			if _, err := b.Pool.Exec(ctx, `
 UPDATE shipments
 SET carrier = $1, updated_at = NOW()
 WHERE id = $2`, carrier, t.id); err != nil {
-			b.Log.Warn("backfill carrier", "id", t.id, "err", err)
-			continue
+				b.Log.Warn("backfill carrier", "id", t.id, "err", err)
+				continue
+			}
+			updated++
 		}
-		updated++
+
+		lastID = batch[len(batch)-1].id
+		if len(batch) < chunkSize {
+			break
+		}
 	}
 	return updated, nil
 }
